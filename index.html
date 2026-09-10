@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#06236b"><title>MyStream · Duke</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><a class="brand" href="/">MyStream<span>DUKE</span></a><span class="personal">Personal radio companion</span></header>
+<main>
+<section class="intro"><p class="eyebrow">BLUE DEVILS · FOOTBALL & BASKETBALL</p><h1>Your picture.<br>Your Duke call.</h1><p>Line up the radio with your TV, then settle into the game.</p></section>
+<section class="workspace" aria-label="Radio player">
+<div class="source-row"><div><p class="eyebrow">BROADCAST</p><h2 id="source-name">Connect Duke radio</h2></div><span id="state" class="state">Not connected</span></div>
+<div class="timing"><p class="eyebrow">BEHIND INCOMING AUDIO</p><div class="digits"><span id="delay">0.00</span><span class="unit">sec</span></div><p id="buffer-status">Up to 3 minutes of audio held on this device.</p></div>
+<div class="transport"><button id="pause" class="primary" disabled>Pause audio</button><button id="live" disabled>Return to live</button></div>
+<div class="adjust"><div class="section-label"><h3>Fine-tune timing</h3><label>Step <select id="step"><option value="0.25">0.25 sec</option><option value="0.5">0.5 sec</option><option value="1">1 sec</option><option value="5">5 sec</option></select></label></div><div class="adjust-buttons"><button id="earlier" disabled>− Less delay</button><button id="later" disabled>+ More delay</button></div><p>Call comes too early? Add delay. Call comes too late? Reduce it.</p></div>
+<div class="automatic"><h3>Sync to your TV</h3><p>Point the camera at the TV scoreboard. The app reads the clock and listens for matching references in the radio call.</p><button id="auto-sync" disabled>Sync with camera</button><button id="stop-sync" hidden>Stop analysis</button><video id="camera" muted playsinline hidden></video><p id="camera-status" role="status"></p><p id="radio-status" role="status">Experimental automatic sync · waits for consistent clock references.</p></div>
+<details class="align"><summary>Manual timing controls</summary><h3>Match a play</h3><p id="align-help">When you hear a distinct play on the radio, tap below. Tap again when you see that play on TV.</p><button id="align" disabled>I heard the play</button><button id="cancel-align" hidden>Cancel</button></details>
+<div class="volume"><label for="volume">Volume</label><input type="range" min="0" max="1" step="0.01" value="0.8" id="volume"><button id="stop" disabled>Disconnect</button></div>
+<p id="notice" role="status" aria-live="polite">Connect a broadcast or try the timing demo.</p>
+</section>
+<aside class="setup"><p class="eyebrow">DUKE RADIO</p><h2>Choose a broadcast.</h2><p id="schedule-status" role="status">Loading Duke’s official broadcast list…</p><label for="broadcast">Broadcast or replay</label><select id="broadcast" disabled></select><button id="duke-play" class="primary" disabled>Play Duke radio</button><button id="refresh-schedule">Refresh list</button><p class="small">Times below are radio coverage times. Replays are labeled separately.</p><a href="https://duke.leanplayer.com/" target="_blank" rel="noopener noreferrer">Duke’s official player ↗</a>
+<div class="limitation"><h3>How automatic sync works</h3><p>The app compares several TV clock readings with a consistent sequence of running-clock calls in Duke’s commentary, then adjusts the radio automatically. Keep the camera on the scoreboard while it finds a match.</p><p>This is an experimental timing estimate. Sparse commentary, stopped clocks, and announcer delay can prevent a match or affect accuracy. Homestream-equivalent accuracy has not been verified.</p><p>TV provider is not required. Audio and camera images are processed locally; recognition models download on first use.</p></div>
+<details><summary>Other audio sources</summary><p>For desktop Chrome or Edge, start a broadcast in a separate tab and share its audio.</p><button id="connect">Connect broadcast tab</button><label for="file">Open an audio recording</label><input id="file" type="file" accept="audio/*"><button id="demo">Try timing demo</button><p>The demo plays a repeating tone, not Duke commentary.</p></details></aside>
+</main><footer>Independent personal project · Not affiliated with Duke or Homestream.<span>Audio stays on your device.</span></footer>
+<script type="module" src="/src/app.js"></script>
+</body></html>

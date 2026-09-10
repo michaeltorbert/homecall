@@ -1,0 +1,19 @@
+{
+  "name": "mystream-duke",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "node server.mjs",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.2.0",
+    "tesseract.js": "6.0.1",
+    "vite": "8.2.2"
+  },
+  "overrides": {
+    "sharp": "^0.35.4"
+  }
+}
