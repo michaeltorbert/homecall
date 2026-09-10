@@ -31,7 +31,7 @@ export class ManualEngine {
     else if (type === 'cancel' && this.hold) {
       h.setDelay(this.hold.delay); h.paused = this.hold.paused; this.hold = null;
     } else if (type === 'interrupt' || type === 'invalidate') {
-      if (type === 'interrupt') this.ingesting = false;
+      if (type === 'interrupt') { this.ingesting = false; if (value === true) h.paused = true; }
       if (this.hold) { this.hold = null; h.paused = true; }
     } else result = 'unavailable';
     return { result, before, after: this.snapshot() };

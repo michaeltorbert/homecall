@@ -7,7 +7,6 @@
 - **SHARE-01**: Confirm native JSON share to Mail/Messages, clipboard and download on another person's phone. Verify the received payload matches the preview and that canceling sharing retains the local log.
 - **CONTINUITY-01**: Measure behavior over a full game including commercial returns, phone calls, app switching, screen lock and Bluetooth changes. Foreground operation is the current target; background support is unverified.
 - **VISUAL-01**: Inspect actual 320–430px phone layouts, keyboard focus and slider interaction in a permitted browser. Current managed browser inspection is blocked by policy; no bypass allowed.
-- **HOST-01**: Enable repository Pages via GitHub Actions, complete deployment, verify published assets and provide a working phone URL. The Codex App currently has no Pages permission.
 
 ## Deferred product work
 
@@ -20,3 +19,7 @@
 ## Planning disposition
 
 The accepted plan incorporates continuity clocks and uncertainty, deterministic cancel, grouped correction episodes, privacy allowlists, engine-atomic nudges, source epochs and zero-delay TV guidance. Claims that an expired schedule must block a known live channel, that silence necessarily proves a stall, and that a redundant Miami fallback requires new scope were rejected. Four reviewers accepted the dispositions; Kimi was unavailable. No reviewer exclusion was adopted.
+
+## Hosting configuration
+
+GitHub Pages was enabled with GitHub Actions by the user on September 10, 2026; repository metadata confirms it. Deployment and commit identity are verified through the repository workflow before sharing the phone link. The workflow remains the current source of deployment status.

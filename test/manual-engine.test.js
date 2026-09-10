@@ -54,3 +54,8 @@ test('context invalidation aborts a hold without permanently stopping live inges
   const e = engine(); feed(e,[1,2]); e.command('hold'); e.command('invalidate');
   assert.equal(e.snapshot().ingesting, true); assert.equal(e.snapshot().holding, false); assert.equal(e.snapshot().paused, true);
 });
+test('native source pause holds retained audio rather than silently draining the delay',()=>{
+ const e=engine();feed(e,[1,2,3,4]);e.command('delay',.5);e.command('interrupt',true);
+ assert.deepEqual(feed(e,[5,6,7,8]).samples,[0,0,0,0]);assert.equal(e.snapshot().delay,.5);assert.equal(e.snapshot().paused,true);
+ e.command('ingest',true);e.command('pause',false);assert.deepEqual(feed(e,[9,10]).samples,[3,4]);
+});

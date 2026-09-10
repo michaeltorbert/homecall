@@ -27,6 +27,7 @@ const player = new Player(update, event => {
       'source-error': 'This stream could not play. Reconnect or try the official player; availability can depend on broadcast rights or location.',
       'context-interrupted': 'Phone audio was interrupted. Press Resume audio, then check alignment.',
       'engine-error': 'The audio engine stopped. Reconnect to start a fresh buffer.',
+      'control-overflow': 'Audio disconnected after too many pending source events. Press Play to reconnect.',
       'command-timeout': 'Audio disconnected because a timing change could not be confirmed. Reconnect to begin with a fresh buffer.',
       'resume-failed': 'Audio could not resume. Reconnect when your phone is ready for playback.',
       'buffer-overrun': 'The held audio reached the 3-minute limit. Playback is paused; choose a new sync point.'
@@ -37,7 +38,11 @@ const player = new Player(update, event => {
   render();
 });
 function update(value) {
-  if (value === null && active) { log.end(state); active = false; sourceStatus = 'Disconnected'; refreshSessions(); }
+  if (value === null && active) {
+    log.end(state); active = false; sourceStatus = 'Disconnected';
+    if (demo) URL.revokeObjectURL(demo); demo = null;
+    refreshSessions();
+  }
   state = value; render();
 }
 function render() {

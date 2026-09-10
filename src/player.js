@@ -32,7 +32,7 @@ export class Player {
     const interrupted = (kind) => {
       if (!valid()) return;
       this.mediaPlaying = false;
-      if (this.node) this.command('interrupt').catch(() => {});
+      if (this.node) this.command('interrupt', kind === 'source-paused').catch(() => {});
       this.onEvent(kind);
     };
     audio.onwaiting = () => interrupted('source-waiting');
@@ -67,20 +67,26 @@ export class Player {
       node.onprocessorerror = () => interrupted('engine-error');
       source.connect(node); node.connect(gain); gain.connect(context.destination);
       await settled;
-      if (valid()) await this.command('ingest', !!this.mediaPlaying);
+      if (valid()) await Promise.race([this.command('ingest', !!this.mediaPlaying), deadline]);
     } catch (error) { if (valid()) this.stop(); throw error; }
     finally { clearTimeout(startupTimer); }
   }
   command(type, value) {
     const id = ++this.sequence, epoch = this.epoch;
     if (!this.node) return Promise.reject(new Error('disconnected'));
+    const internal = ['ingest', 'interrupt', 'invalidate'].includes(type);
+    // Safe lifecycle controls can wait through suspension. Bound their retained correlations.
+    if (internal && [...this.pending.values()].filter(p => p.internal).length >= 64) {
+      this.onEvent('control-overflow'); this.stop(); this.onState(null);
+      return Promise.reject(new Error('control-overflow'));
+    }
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = internal ? null : setTimeout(() => {
         this.pending.delete(id);
         // Close the epoch: a queued command must never take effect later in an apparently healthy session.
         this.onEvent('command-timeout'); this.stop(); this.onState(null); reject(new Error('timeout'));
       }, 2500);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, internal });
       this.node.port.postMessage({ id, epoch, type, value });
     });
   }

@@ -81,3 +81,22 @@ test('hung resume releases the operation by closing its source after a bounded d
  const resumed=h.player.resumeContext(),rejection=assert.rejects(resumed,/resume-timeout/);
  timers.find(t=>t.ms===5000).fn();await rejection;assert.equal(h.contexts[0].closed,true);assert.equal(h.events.at(-1),'resume-failed');assert.equal(h.states.at(-1),null);
 });
+test('safe internal controls survive suspension without timeout teardown and accept later acknowledgments',async()=>{
+ const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});await connect(h);
+ const c=h.contexts[0],a=h.audios[0],n=h.nodes[0];c.state='suspended';c.onstatechange();a.paused=true;a.onpause();
+ assert.deepEqual(n.messages.slice(1).map(m=>m.type),['invalidate','interrupt']);
+ assert.equal(n.messages.at(-1).value,true);assert.equal(timers.filter(t=>!t.cleared && t.ms===2500).length,0);
+ assert.equal(c.closed,undefined);assert.equal(h.player.pending.size,2);
+ n.ack(1);n.ack(2);await tick();assert.equal(h.player.pending.size,0);assert.equal(c.closed,undefined);h.player.stop();
+});
+test('internal acknowledgments are bounded even through an excessive source-event storm',async()=>{
+ const h=harness();await connect(h);const promises=[];
+ for(let i=0;i<65;i++) promises.push(h.player.command('invalidate').catch(e=>e.message));
+ await Promise.all(promises);assert.equal(h.contexts[0].closed,true);assert.equal(h.player.pending.size,0);assert.equal(h.events.at(-1),'control-overflow');
+});
+test('initial ingest acknowledgment remains covered by the startup deadline',async()=>{
+ const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});
+ const started=h.player.start('https://fixture/stream'),rejection=assert.rejects(started,/source-timeout/);
+ h.audios[0].played.resolve();h.contexts[0].module.resolve();await tick();assert.equal(h.nodes[0].messages.length,1);
+ timers.find(t=>t.ms===20000).fn();await rejection;assert.equal(h.contexts[0].closed,true);
+});
