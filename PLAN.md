@@ -1,0 +1,55 @@
+# MyStream manual player v1
+
+Status: reviewed September 10, 2026; available-seat agreement from Codex, Claude, Grok and Gemini. Kimi unavailable; no full-roster consensus. Accepted clarifications are implemented and explained in SYNC-DESIGN.md. Supersedes automatic synchronization as the primary product requirement. Preserve the original prototype in Git history.
+
+## Outcome
+
+A phone-friendly player for Miami Hurricanes, Duke and Virginia Tech internet game audio. Manual alignment is the main interaction; logging provides evidence about actual adjustment burden. No camera, microphone, speech model, account, central log server or Google login is required. Keep automatic matching research separate for later evaluation.
+
+Miami hosts Florida A&M tonight, September 10 at 8 p.m. Eastern on ACC Network (official Miami football schedule and May 27 game-time announcement verified). Broadcast availability must remain separate from scheduled kickoff. No claim of fixed TV/audio delays.
+
+## Player and interface
+
+- Team selection plus a clearly identified live source and available replays. Never silently play another team's audio. Duke is the default saved preference; Miami is immediately selectable for tonight.
+- Three minutes of retained audio, using the existing stereo AudioWorklet buffer. This is a rolling history, not a recording upload. Incoming audio continues while listening is paused or delayed.
+- Main controls: pause/resume; a direct delay scrubber over available history; separate +/-5, +/-1 and +/-0.25 second buttons; jump to incoming audio. Labels explain call early/add delay and call late/reduce delay. Show introduced audio delay, not an assertion of total stadium latency.
+- Prominent two-tap sync point: tap on hearing a distinctive play to hold audio, tap when seeing it on TV to resume. Allow cancel with explicitly defined restoration. Controls must not fight this mode. When audio trails TV, clearly explain pausing TV; no future-audio promise.
+- Keep chosen delay during continuous playback. Buffer exhaustion, source changes, seeking/reconnects, browser suspension and playback failures invalidate any claim of confirmed sync. Warn and offer quick re-alignment; do not silently clamp beyond retained history or resume paused playback because the buffer filled.
+- Seeking and export actions use settled engine state. Log requested and effective changes separately when clamping occurs. Scrubbing commits one adjustment at gesture end, avoids timer-driven slider thumb jumps and supports keyboard input.
+- A manual 'Sounds aligned' marker distinguishes confirmed alignment from a user browsing the audio. Optional reason chips (initial sync, after a break, drift, interruption, other/unspecified) are quick context, never mandatory.
+- Phone layout puts team, play, delay, sync point and adjustment buttons in the first working screen. No marketing hero. At least44px tap targets, accessible labels, visible focus, sufficient contrast, reduced-motion support. Secondary source details, test tone and logs below.
+- Visual thesis: a calm, compact sports-radio console with restrained team accent, clear type and large transport controls. Content plan: player first, source details second, test log/export last. Interaction thesis: responsive button feedback, stable scrub gesture, short state transitions honoring reduced motion.
+
+## Sources and mobile delivery
+
+Verified existing Duke adapter uses official duke.leanplayer.com and its published XML. VT official sports-network page embeds a public WMT/Leanstream adapter with collegeID9004; its public JSON endpoint has CORS and its live audio is AAC at https://wmt.leanstream.co/WM0401. Duke live MP3 at https://learfield-gd.leanstream.co/IM3501-MP3 and VT live AAC both returned actual audio with an Origin-allowed CORS response during read-only probes. These probes do not establish game content, browser playback or geographic availability.
+
+Miami's official radio affiliation points to WQAM/Audacy. Its public player configuration identifies FM104.3WQAM as the Hurricanes football/basketball home and publishes https://live.amperwave.net/direct/audacy-wqamfmmp3-imc; a GET with browser Origin returned actual MP3 and allowed CORS. This verifies the station stream, not tonight's game content or geographic coverage. Require a public official-origin/config-derived endpoint with appropriate CORS and no bypass of station rights restrictions. If no usable direct stream exists, show the official listening destination and an explicit unsupported in-app source state; do not claim Miami alignment works merely because a team button exists. Treat actual Miami game playback on the user device as a remaining live acceptance check.
+
+Use a team registry and source adapters, not hardcoded Duke checks in UI. Allow only verified source routes in server fetches, with bounded requests and no arbitrary URL proxy. Validate dynamic source data and render it as text. Distinguish live channel, scheduled event, actual playback, replay and source unavailable.
+
+Prefer a static HTTPS site via the existing GitHub repository's Pages hosting so another phone can open one link without installs/accounts or dependence on this Mac. Use direct official audio and CORS-enabled metadata where available. If metadata requires the existing local Node helper, static mode must gracefully expose the verified live channel with honest metadata-unavailable state rather than inventing current coverage. Preserve the local server for development. Never bundle credentials or personal email addresses. Do not require a new paid service or Google Sheets API.
+
+Audio starts only on user gesture. Feature-check AudioContext/AudioWorklet. On iPhone and Android, handle rejected playback, interruption, lock/background transitions and route changes truthfully. Media Session controls and a best-effort screen wake lock may improve usability when available but do not establish background playback support. Document foreground operation as supported target until real phones prove otherwise. End/disconnect stops source tracks and frees resources.
+
+## Logs and sharing
+
+- Local sessions only by default, with schema and app/build version, random sessionID, selected team/event/live-or-replay/sourceID, optional TV provider and output category, UTC time plus monotonic elapsed time, and relevant player capability flags. No identifying device fingerprint, email, location, IP, cookies, audio, microphone or camera data.
+- Events: session start/end, source switch, play/pause/resume, scrub/nudge, two-tap sync start/complete/cancel, explicit alignment confirmation, jump-live, interruption/error/recovery, buffer exhaustion and optional user reason. Record current/effective delay and requested value when relevant. Heartbeat at a modest interval records observation time and playback state without pretending a nudge proves network drift. Export includes observation duration and gaps, including unaligned listening.
+- Separate deliberate adjustments, uncertainty and suspected disruptions. Count confirmed correction episodes rather than treating six quarter-second nudges as six independent drift incidents. Do not infer TV latency or automatic resync accuracy from manual logs.
+- Persist incrementally in bounded local browser storage, tolerate disabled/full storage without breaking playback, show if the log is memory-only, and cap retention with visible warnings. Retain a small set of recent sessions, each bounded in event count, marking truncation explicitly. New sessions get new IDs; a refreshed tab's old session is interrupted, not silently continued with a reset monotonic clock.
+- Prominent 'Share test log': preview readable summary and exact structured data; use system share sheet for a JSON file if available, otherwise downloadable JSON plus a copy button for the complete compact text/JSON. Provide a selectable text area if clipboard access fails. Let the person choose Mail, Messages or another destination; export never sends automatically. Avoid mailto as the sole path because body length and mail-app setup are unreliable.
+- Offer CSV for later spreadsheet import with safe cell handling, or defer it if the JSON plus readable export already serves tonight's test. No Google Sheets integration in v1: it adds account/server setup without improving the immediate phone workflow. Logs can later be imported into a server or sheet using the stable schema. Export should disclose success/cancel/failure accurately and preserve logs after sharing; clear requires deliberate user action.
+
+## Work and checks
+
+1. Publish original source snapshot (done before this plan); establish app-scoped Git identity/remote/instructions. Exclude local recordings, transcripts, handoff PDFs, dependencies, secrets and generated evidence. Source-dependent local-only tests skip explicitly when recordings are absent.
+2. Reconcile this plan with all five seats; unavailable seats nonblocking. Retain substantive responses/provenance/dispositions and required peer closeout. Plan agreement is not code approval.
+3. Implement manual state/controller, engine acknowledgement and lifecycle fixes, team registry/adapters, local session logging/export and phone UI. Remove recognition dependencies from the normal bundle; keep original experiments recoverable in Git history. Update README/requirements/backlog around final behavior.
+4. Run meaningful automated tests: retained sample order across pause/seek; fractional nudge and available-range bounds; overrun/source-end/stall/interruption; stale asynchronous source callbacks; sync cancel/restoration; authoritative action log state; persistence failures, truncation, reload interruption, export roundtrip/redaction, and live/replay/team separation. Build and audit dependencies. Clean checkout tests must pass without private media.
+5. Browser-check at phone and desktop sizes: touch/keyboard scrub behavior, test-tone audio path, each source start/error, two-tap workflow, copy/download/share fallbacks and console errors. Respect any managed browser policy block; no bypass. Distinguish inspected UI and synthetic/component results from real iPhone/Android/Bluetooth operation.
+6. Independent implementation review, fix material findings, retain unresolved real-device or provider limitations in BACKLOG. Publish validated code/site, verify deployed assets match build, and provide a clear phone link and short test instructions. Hosting/source failure is reported explicitly, not as a completed mobile test.
+
+## Acceptance
+
+Manual controls and exported logs must work without automatic recognition or private credentials. All three teams have verified official source integration or conspicuously documented source-specific limitations; Miami cannot be reported ready until actual direct playback is verified. Shared logs must reconstruct when, why (if supplied) and how much a listener adjusted, and must not claim to measure true live latency. Remote phones need a working HTTPS URL. Real background playback, source geographic coverage and uninterrupted commercial returns remain empirical tests, not assumptions.

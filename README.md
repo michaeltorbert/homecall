@@ -1,60 +1,55 @@
-# MyStream · Duke
+# myStream
 
-A local web app that plays Duke radio and estimates alignment with a TV scoreboard seen by the camera. TV provider selection is unnecessary. This is experimental; Homestream-equivalent accuracy has **not** been established.
+A small manual-sync internet audio player for Duke, Miami and Virginia Tech. Open the site, choose your team, and delay the call to match your TV. No account, microphone, camera or recognition model is required.
 
-The [updated sync design](SYNC-DESIGN.md) calls for a prepared radio timeline, fast camera lookup and continued checking after commercial breaks. Those changes are planned, not implemented. Establishing an accurate radio-to-game-clock map is the next feasibility gate.
+## Listen and align
 
-## Run
+1. Choose a team and press **Play**. Keep the page in the foreground for this first version.
+2. If the call arrives before the TV picture, use **Match a play**: tap when you hear a distinctive play, then tap again when you see it. Audio pauses between taps while the incoming history keeps filling.
+3. Fine-tune with **±5 s, ±1 s or ±¼ s**, or the delay slider. Press **Sounds aligned** to mark the result in your log.
+4. Check alignment after commercials or interruptions. If the call is late even at zero delay, pause your TV until it catches up. This app cannot play audio from the future.
 
-Requires Node.js 22.12+ or a compatible newer version.
+Pause keeps collecting audio for up to three minutes. A buffer overrun cancels a pending match and leaves audio paused. Canceling a match restores the delay from before the first tap relative to the current incoming edge; it skips the abandoned hold. Reconnecting or switching teams discards the previous buffer. If a user timing command cannot be acknowledged, the app disconnects rather than allowing that queued change to apply unexpectedly later; reconnect when ready. The displayed delay is what this app adds, **not total stadium-to-listener latency**.
+
+## Send a test log from a phone
+
+Open **Share a test log**, preview it, then tap **Share test log** and choose Mail or Messages. If the browser lacks a share menu, **Copy** the complete log and paste it into an email, or **Download** the JSON attachment. Nothing is sent automatically and no recipient is hardcoded. Refresh the preview to include newer adjustments.
+
+Logs contain team/source identifiers, times, requested and applied adjustments, interruptions and your alignment marks. Optional TV-service and output categories are selected before starting. They contain no recorded audio, camera images, email address, device fingerprint, source URLs or raw error text. The broadcaster and site host still receive ordinary network requests. Up to 10 sessions and 2,000 events per session are retained locally; truncation is disclosed. If local storage is blocked/full, export before closing the page. Unclosed logs after a reload are labeled last-saved snapshots.
+
+Several nudges before another alignment mark form one confirmed adjustment episode. Neither those episodes nor observed playback intervals prove actual TV drift or continued audiovisual alignment.
+
+## Sources
+
+- Duke: [official player](https://duke.leanplayer.com/), published Leanstream live channel.
+- Miami: [official radio affiliates](https://miamihurricanes.com/miami-hurricanes-football-radio-affiliates/), [WQAM official player](https://www.audacy.com/stations/wqam), public player-configured Amperwave channel.
+- Virginia Tech: [official sports network](https://hokiesports.com/virginia-tech-sports-network), published WMT/Leanstream channel.
+
+All three endpoints returned audio and allowed the site Origin during September 10, 2026 source probes. That proves transport availability at the time, not game content, geographic rights, or successful playback on a particular phone. Channels remain selectable independently of stale or unavailable schedule metadata. Replays are deferred in this manual release. The optional local Duke schedule adapter remains available for future use.
+
+## Develop
+
+Node.js 22.12 or later:
 
 ```sh
 npm ci
+npm test
 npm run build
 npm start
 ```
 
-Open http://127.0.0.1:4178 on this computer. Select a Duke broadcast, start playback, then select **Sync with camera**. Include Duke's team label, the period, and a moving game clock in the picture. Recognition models download on first use; keep the page open while they load. Fine adjustments and manual timing are also available.
+Open `http://127.0.0.1:4178/`. Tests use generated samples and mocked media boundaries; no private recordings are required. They are not device acceptance tests. The production app is static, with relative asset paths suitable for a repository subdirectory.
 
-The server listens only on this computer. Phone installation, remote access, and background mobile playback are not implemented. Camera access requires a supported browser and permission. No account or API key is required.
+## Publish for phones
 
-## Implemented
+The repository's Pages workflow tests and builds on pushes to `main`; it deploys the resulting static assets to GitHub Pages. Enable **Settings → Pages → Source → GitHub Actions** once. See [GitHub's custom workflow instructions](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
-- Fresh broadcast discovery from Duke's official player, with upcoming coverage and recordings distinguished. A stale `isLive` field alone never establishes on-air status.
-- Direct Duke playback, three-minute stereo history, pause/resume, return to incoming audio, and 0.25/0.5/1/5-second adjustments.
-- Camera scoreboard recognition with capture timestamps, period checks, and observed clock movement.
-- Local radio speech recognition, timestamped clock extraction, radio-derived period association, and repeated-camera confirmation before a supported estimate changes playback.
-- Rejection of conflicting periods, duplicate transcription windows, unsupported extrapolation, ambiguous matches, expired audio, and stale camera results. When the requested radio moment has not arrived, the app explains that TV must be paused.
-- Camera and radio analysis stop after application, cancellation, manual timing changes, source changes, or a reported Duke playback stall.
+Expected URL after a successful deployment: `https://michaeltorbert.github.io/mystream/`. Do not treat this as live until the workflow succeeds and the deployed assets are verified.
 
-Automatic matching covers regulation football and basketball. It requires enough clear, compatible clock and period references in the commentary. It may take a long time or find no match. Overtime is not supported.
+HTTPS is required on remote devices for the audio worklet and sharing features. Foreground iPhone/Android, Bluetooth, actual station playback, share-sheet delivery and commercial return behavior remain real-device acceptance checks. Automated browser inspection in this development environment is blocked by managed security policy; no alternate browser bypass was used.
 
-Both matching references currently need explicit running-clock language. This conservative requirement limits coverage, particularly in basketball. The radio also needs enough lead over the TV for an audio window to finish and recognition to catch up; a small lead may prevent matching. The app offers pause-TV guidance when the TV has passed analyzed coverage. Recognition speed in a browser has not been measured.
+## History and review
 
-## Accuracy and validation
+The original Duke automatic-sync prototype is preserved in commit `549a719b2a188f8166a8a50b586fe475d26b8bd1`. Its recognition code, experiments and model dependencies were removed from the active manual release, not erased from history. Private recordings/transcripts were never uploaded.
 
-The algorithm interpolates between two short, consistent running-clock utterances with the same radio-associated period. It uses the median timing offset across confirming camera readings and compensates for camera processing time and reported output latency while remaining inside the supported radio segment. Speech timestamps locate the announcer's words; they do not independently establish the physical game moment. Utterance agreement is **not** a measured audiovisual error bound. Announcer delay, recognition errors, unobserved stoppages, and a mismatched game can still produce an incorrect estimate.
-
-`npm test` exercises buffering, parsing, period association, matching, latency direction, source parsing, and scan lifecycle. `npm run build` produces the browser bundle.
-
-Two excerpts from the official September 5 Duke–Tulane recording were transcribed locally. The in-game excerpt supplied real clock candidates; it was not paired with independently timed TV video. A generated scoreboard was recognized with actual Tesseract OCR. These validate components, **not** live TV accuracy or camera performance in a room.
-
-The in-game excerpt was additionally checked in 24 overlapping 20-second recognition windows, matching the app's window and hop sizes. The final window contains 0.0081875 seconds of silence padding at the excerpt end. Processing used native local inference, so this does not establish browser WASM speed. See `output/tulane-stream-windows.json` and `output/validation.json`.
-
-Browser verification remains unavailable: the in-app browser refused access because its administrator-enforced security check could not be verified. No alternate browser or indirect access was used to circumvent that refusal. See [BACKLOG.md](BACKLOG.md) for remaining acceptance work.
-
-## Data and dependencies
-
-Audio history, recognition, and camera processing stay on the device. The app contacts Duke/Leanstream for schedules and audio, and public model/library hosts for recognition assets. Camera images and microphone audio are not uploaded; microphone access is never requested. Public transcript fixtures used in development are separate from the temporary playback buffer.
-
-Dependency audit on September 10 reported three high-severity advisories in the Transformers native Node dependency chain through `onnxruntime-node` and `adm-zip`. The indicated patched `adm-zip` release was unavailable from the registry. The browser uses WASM; the outstanding advisory concerns native installer ZIP extraction. A `sharp` advisory was resolved with an override. The dependency audit is not clean.
-
-## Primary sources
-
-- [Duke's official player](https://duke.leanplayer.com/)
-- [Duke radio listening information](https://goduke.com/sports/2022/8/6/local-radio-affiliates)
-- [Homestream's feature description](https://homestream.app/faqs/)
-
-Independent personal project; not affiliated with Duke, Learfield, or Homestream.
-
-Local broadcast recordings, transcripts and review handoffs are excluded from the public repository. Two recording-dependent tests explicitly skip when those optional local fixtures are absent.
+The manual plan received available-seat agreement from Codex, Claude, Grok and Gemini. Kimi was unavailable, so this is not full-roster consensus. Planning approval is separate from implementation review. See `PLAN.md`, `SYNC-DESIGN.md`, `REQUIREMENTS.md` and `BACKLOG.md` for the current contract and remaining checks.

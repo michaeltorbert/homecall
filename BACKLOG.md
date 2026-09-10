@@ -1,34 +1,25 @@
-# Remaining acceptance work
+# Follow-up and acceptance work
 
-These are unresolved delivery limits, not completed checks.
+## Required live acceptance (open)
 
-1. **Measure real audiovisual alignment.** Paired Duke–Tulane media is now available: user-supplied `tulane.mp4` with commercials removed and the official radio archive. The [initial acoustic experiment](output/acoustic-test/README.md) found a shared referee announcement and promising but ambiguous ordinary-play candidates. Add independent event/edit annotations across both halves, develop short-snippet agreement and calibrated confidence, then test held-out intervals before integrating automatic seeks. Include missing matches, stops, returns from breaks, quarter changes, and announcer delay. Component tests cannot establish viewing accuracy. Owner: next implementation/validation pass.
-2. **Complete browser and device validation.** Once the browser security check is available, exercise Duke audio, model startup, real camera OCR, audible automatic seeks, source stalls, cancellation, and repeated scans. Do not bypass the administrator-enforced refusal. Mobile and Bluetooth accuracy remain untested. Owner: next validation pass.
-3. **Resolve native dependency advisories.** Update the Transformers/ONNX dependency chain when a patched compatible release is available, rerun the audit and local transcription check, and remove the audit limitation only after verification. Owner: dependency maintenance.
-4. **Expand automatic coverage after measurement.** Improve clock/event detection and period continuity with representative Duke football and basketball recordings. Add overtime with matching clock rules and validation. Regulation-only estimates must remain experimental until measured.
-5. **Prove a radio clock map suitable for fast camera lookup.** Highest-priority feasibility work under the [September 10 design](SYNC-DESIGN.md). Verify an available timed source or test public play-by-play plus radio event/clock constraints. Measure narrative lag, missing clock transitions, index freshness and false matches. A score feed or a speech timestamp alone is insufficient. Use causal replay with independent training/held-out references; include failed joins and elapsed-time coverage. No provider purchase or outreach has been performed. Owner: next timing-input and validation pass.
-6. **Prepare radio before Sync and keep indexing during listening.** After item 5 establishes usable timing inputs, move ingest/indexing into a local service with bounded persistent audio history, explicit source epochs and clients playing that exact indexed audio. Separate indexing from the camera session and manual adjustment bias. Measure cold and warm starts; prewarming must not hide excessive ongoing indexing latency. Owner: next implementation pass after feasibility.
-7. **Keep checking and recover after breaks.** Implement camera observations throughout listening, explicit uncertainty when the scoreboard is unavailable, fresh confirmation after returns, and independent handling of radio gaps, TV delay changes and output-device changes. Avoid correction oscillation and preserve user fine adjustment. Test known delay jumps and actual intact-commercial live coverage; a brief re-scan remains necessary when the TV is otherwise unobserved. Owner: next implementation/validation pass after feasibility.
+- **DEVICE-01**: On an actual iPhone and Android, open the deployed HTTPS site, play each team source, confirm audible delayed output, exercise pause/scrub/rapid nudges/two-tap/cancel and export the session. Transport probes and component mocks do not satisfy this.
+- **MIAMI-01**: Confirm WQAM carries the intended Miami game for the listener's location during coverage. If rights block it, retain the official-player link and unavailable explanation; do not bypass restrictions.
+- **SHARE-01**: Confirm native JSON share to Mail/Messages, clipboard and download on another person's phone. Verify the received payload matches the preview and that canceling sharing retains the local log.
+- **CONTINUITY-01**: Measure behavior over a full game including commercial returns, phone calls, app switching, screen lock and Bluetooth changes. Foreground operation is the current target; background support is unverified.
+- **VISUAL-01**: Inspect actual 320–430px phone layouts, keyboard focus and slider interaction in a permitted browser. Current managed browser inspection is blocked by policy; no bypass allowed.
 
-## Independent review dispositions
+## Deferred product work
 
-- Wrong-period automatic seek: actionable; estimator now requires a radio-associated period. Missing radio period cannot be filled from TV. Period association has a separately tested bounded radio-only chain.
-- Stale camera failure interrupting a newer scan: actionable; generation checks protect failures and callbacks, and camera cleanup only clears its own stream.
-- Speech processing continuing after successful application: the prior one-shot implementation deliberately stops analysis. **Superseded as a product requirement on September 10:** continuous indexing and TV observation are now required for unattended correction; replacement is tracked in items 6 and 7. Do not simply delete cleanup without adding lifecycle and discontinuity handling.
-- Announcer timing and same-game uncertainty: remains an acceptance limitation tracked in item 1.
+- **DATA-01**: Import JSON logs into a spreadsheet/server only after the user has real sessions and a useful analysis question. CSV export requires safe cell handling. No Google OAuth or server ingestion is necessary for v1.
+- **SOURCES-01**: Add replays and CORS-safe schedule adapters without gating live channels on stale metadata. Validate naive timezone fields against publisher semantics before calling them authoritative.
+- **AUTO-01**: Decide whether automatic assistance is worthwhile from correction episodes, uncertainty intervals and user reports. Do not infer true drift from each nudge or claim ongoing alignment from a confirmation interval.
+- **AUDIO-01**: Measure memory and battery on older phones before changing the approximately 69 MB stereo float buffer at 48 kHz. Consider narrower storage only with evidence.
+- **UX-01**: Consider Media Session and wake-lock integration after actual foreground operation is verified; neither proves background continuity.
 
-## Claude review dispositions
+## Planning disposition
 
-Claude Fable 5.1 reviewed the source snapshot recorded in `output/claude-review.json`. Codex verified the findings and subsequent fixes; Claude was not rerun on the changed artifact. No consensus or final-artifact Claude approval is claimed.
+The accepted plan incorporates continuity clocks and uncertainty, deterministic cancel, grouped correction episodes, privacy allowlists, engine-atomic nudges, source epochs and zero-delay TV guidance. Claims that an expired schedule must block a known live channel, that silence necessarily proves a stall, and that a redundant Miami fallback requires new scope were rejected. Four reviewers accepted the dispositions; Kimi was unavailable. No reviewer exclusion was adopted.
 
-- **F1 — Restricted running-clock grammar:** broaden present-tense recognition and retain negation/stopped guards. Requiring both anchors to report a running clock remains an intentional conservative policy; relaxing it without paired validation is rejected for this version. Coverage limits, especially basketball, are documented above and in item 4.
-- **F2 — Score preceding a numeric clock:** fix the parser guard for self-contained colon/dash clocks; retain protection against malformed or unfinished spoken clocks.
-- **F3 — Processing needs sufficient radio lead:** accepted as a structural limitation. Added pause-TV guidance when TV passes analyzed coverage and documentation of the limitation. Claude's numerical lead estimates were not independently measured and are not adopted as performance claims. Latency improvements belong to items 2 and 4.
-- **F4 — Missing/wrong status:** added analyzed-coverage guidance and a specific stale-reading message.
-- **F5 — Slow recognition discards every busy window:** retain the latest waiting window, process it next, and report that recognition is catching up. The queue stays bounded; severely overloaded devices can still lose coverage.
-- **F6 — Conflicting overlapping transcripts:** preserve abstention and show an explicit ambiguity status. Reject the proposal to choose around a disagreeing same-utterance candidate because that could turn uncertain recognition into a false seek. Improved reconciliation requires measured evidence under item 4.
-- **F7 — One bad final camera reading shifts playback:** apply the median offset across confirming frames. Also reject latency compensation that would leave the supported radio interval.
-- **F8 — Stop analysis after stream stalls:** retain the conservative restart behavior. A stall invalidates sample-time continuity; retaining and reusing candidates safely would require verified discontinuity handling. It is a deliberate current limitation, not a silent failure. The buffer holds three minutes, not eight minutes as one review scenario stated.
-- **F9 — Basketball edges and minor cleanup:** fix women's regulation duration bounds, normalize numeric/string sport IDs, and parse fractional subminute scoreboards. Retain the unused semantic matcher as a documented, tested utility; removing it provides no functional benefit here.
+## Hosting configuration
 
-Independent review confirmed the direction of timing adjustments, timestamp resampling, and cancellation checks, but did not establish real TV alignment or browser behavior. Those remain items 1 and 2.
+GitHub Pages was enabled with GitHub Actions by the user on September 10, 2026; repository metadata confirms it. Deployment and commit identity are verified through the repository workflow before sharing the phone link. The workflow remains the current source of deployment status.
