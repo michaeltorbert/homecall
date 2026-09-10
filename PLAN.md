@@ -1,6 +1,6 @@
 # MyStream manual player v1
 
-Status: proposed for the five-seat planning review, September 10, 2026. Supersedes automatic synchronization as the primary product requirement. Preserve the original prototype in Git history.
+Status: reviewed September 10, 2026; available-seat agreement from Codex, Claude, Grok and Gemini. Kimi unavailable; no full-roster consensus. Accepted clarifications are implemented and explained in SYNC-DESIGN.md. Supersedes automatic synchronization as the primary product requirement. Preserve the original prototype in Git history.
 
 ## Outcome
 

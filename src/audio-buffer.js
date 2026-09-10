@@ -8,6 +8,7 @@ export class AudioHistory {
     this.read = 0;
     this.paused = false;
     this.overrun = false;
+    this.rendered = 0;
   }
   get delay() { return (this.written - this.read) / this.sampleRate; }
   get available() { return Math.min(this.written, this.capacity) / this.sampleRate; }
@@ -38,7 +39,7 @@ export class AudioHistory {
       }
       const audible = !this.paused && this.read < this.written;
       for (let c = 0; c < output.length; c++) output[c][i] = audible ? this.channels[Math.min(c, 1)][this.read % this.capacity] : 0;
-      if (audible) this.read++;
+      if (audible) { this.read++; this.rendered++; }
     }
   }
 }
