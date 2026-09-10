@@ -22,6 +22,7 @@ const player = new Player(update, event => {
     const messages = {
       'source-waiting': 'The source is buffering. Check alignment when it returns.',
       'source-stalled': 'The source stopped delivering data. Check alignment when it returns.',
+      'source-paused': 'Your phone paused the source. Press Resume audio, then check alignment.',
       'source-ended': 'The source ended. Reconnect to start a fresh audio buffer.',
       'source-error': 'This stream could not play. Reconnect or try the official player; availability can depend on broadcast rights or location.',
       'context-interrupted': 'Phone audio was interrupted. Press Resume audio, then check alignment.',
@@ -43,7 +44,7 @@ function render() {
   $('connect').disabled = connecting;
   $('stop').disabled = !active && !connecting;
   $('pause').disabled = !ready || holding || specialPending;
-  $('pause').textContent = state?.paused || player.context?.state !== 'running' ? 'Resume audio' : 'Pause audio';
+  $('pause').textContent = state?.paused || player.audio?.paused || player.context?.state !== 'running' ? 'Resume audio' : 'Pause audio';
   $('hold').disabled = !ready || specialPending || (!holding && (state.paused || !state.ingesting));
   $('hold').textContent = holding ? 'I see it on TV · resume audio' : 'I heard the play · hold audio';
   $('cancel').hidden = !holding;
@@ -144,6 +145,9 @@ function refreshSessions(preferred) {
     $('sessions').append(option);
   }
   if (records.some(s => s.id === selectedId)) $('sessions').value = selectedId;
+  if ($('sessions').value !== previewId) {
+    previewText = ''; $('export').value = ''; $('log-summary').textContent = '';
+  }
   if (!records.length) { const option = document.createElement('option'); option.value = ''; option.textContent = 'No sessions yet'; $('sessions').append(option); }
 }
 function preview() {
@@ -161,7 +165,7 @@ function preview() {
 $('team').value = selected; $('team').onchange = teamChanged;
 $('connect').onclick = () => connect(); $('demo').onclick = () => connect(true);
 $('stop').onclick = () => { disconnect(); notice('Disconnected. Your saved logs are still available below.'); };
-$('pause').onclick = () => command('pause', player.context?.state !== 'running' ? false : !state.paused);
+$('pause').onclick = () => command('pause', player.context?.state !== 'running' || player.audio?.paused ? false : !state.paused);
 $('hold').onclick = () => command(state?.holding ? 'complete' : 'hold');
 $('cancel').onclick = () => command('cancel'); $('confirm').onclick = () => command('confirm');
 $('live').onclick = () => command('live');

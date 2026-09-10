@@ -46,3 +46,14 @@ test('session retention and deliberate deletion leave no saved entries', () => {
   const {log,advance}=fixture({maxSessions:2});for(let i=0;i<4;i++){log.end();advance(1000);log.start('vt','vt-leanstream');}
   assert.equal(log.list().length,2);assert.equal(log.clear(),false);log.end();assert.equal(log.clear(),true);assert.equal(log.list().length,0);
 });
+test('ack preserves the independent AudioContext clock; malformed persisted records are ignored',()=>{
+ const store=storage();store.setItem(PREFIX+'broken',JSON.stringify({schemaVersion:1,events:[]}));
+ const {log}=fixture({storage:store});assert.equal(log.list().length,1);
+ log.acknowledge('nudge',{id:1,epoch:3,result:'applied',before:state(),after:state(),contextSeconds:7.125});
+ assert.equal(log.session.events.at(-1).after.contextSeconds,7.125);
+});
+test('clear removes malformed own records too without touching unrelated site preferences',()=>{
+ const store=storage();store.setItem(PREFIX+'broken','{');store.setItem('other.preference','keep');
+ const {log}=fixture({storage:store});log.end();assert.equal(log.clear(),true);
+ assert.equal(store.getItem(PREFIX+'broken'),undefined);assert.equal(store.getItem('other.preference'),'keep');
+});

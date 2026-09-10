@@ -37,6 +37,7 @@ export class Player {
     };
     audio.onwaiting = () => interrupted('source-waiting');
     audio.onstalled = () => { if (audio.readyState < 3) interrupted('source-stalled'); };
+    audio.onpause = () => interrupted('source-paused');
     audio.onended = () => interrupted('source-ended');
     audio.onerror = () => interrupted('source-error');
     // Connect before play so the element never bypasses the delay engine.
@@ -46,7 +47,7 @@ export class Player {
     const deadline = new Promise((_, reject) => { startupTimer = setTimeout(() => reject(new Error('source-timeout')), 20000); });
     const settled = Promise.race([Promise.all([resumed, played]), deadline]); settled.catch(() => {});
     try {
-      await context.audioWorklet.addModule(workletURL);
+      await Promise.race([context.audioWorklet.addModule(workletURL), deadline]);
       if (!valid()) return;
       const node = this.node = new AudioWorkletNode(context, 'broadcast-buffer', { outputChannelCount: [2] });
       const gain = this.gain = context.createGain(); gain.gain.value = this.volume ?? 0.8;
@@ -81,14 +82,19 @@ export class Player {
       this.node.port.postMessage({ id, epoch, type, value });
     });
   }
-  async resumeContext() { if (this.context) await this.context.resume(); }
+  async resumeContext() {
+    const tasks = [];
+    if (this.context) tasks.push(this.context.resume());
+    if (this.audio?.paused && !this.audio.ended) tasks.push(this.audio.play());
+    await Promise.all(tasks);
+  }
   setVolume(value) { this.volume = value; if (this.gain) this.gain.gain.value = value; }
   stop() {
     ++this.epoch;
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('disconnected')); }
     this.pending.clear();
     if (this.audio) {
-      this.audio.onplaying = this.audio.onwaiting = this.audio.onstalled = this.audio.onended = this.audio.onerror = null;
+      this.audio.onplaying = this.audio.onwaiting = this.audio.onstalled = this.audio.onended = this.audio.onpause = this.audio.onerror = null;
       this.audio.pause(); this.audio.removeAttribute('src'); this.audio.load();
     }
     if (this.context) { this.context.onstatechange = null; this.context.close().catch(() => {}); }

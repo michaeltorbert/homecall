@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 function deferred() { let resolve,reject; const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject}; }
-function harness() {
+function harness(timing = {}) {
   const contexts=[],audios=[],nodes=[],events=[],states=[];
   class Context {
     constructor(){this.state='running';this.module=deferred();this.audioWorklet={addModule:()=>this.module.promise};contexts.push(this);}
@@ -23,7 +23,7 @@ function harness() {
     connect(){}
     ack(index=0){const m=this.messages[index];this.port.onmessage({data:{type:'ack',...m,action:m.type,type:'ack',result:'applied',after:{delay:0,paused:false},contextSeconds:1}});}
   }
-  const sandbox=vm.createContext({window:{AudioContext:Context,AudioWorkletNode:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout,clearTimeout});
+  const sandbox=vm.createContext({window:{AudioContext:Context,AudioWorkletNode:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout:timing.setTimeout || setTimeout,clearTimeout:timing.clearTimeout || clearTimeout});
   const source=fs.readFileSync(new URL('../src/player.js',import.meta.url),'utf8').replace(/^import .*;\n/,'').replace('export class Player','class Player');
   vm.runInContext(source+'\nglobalThis.Player = Player;',sandbox);
   const player=new sandbox.Player(s=>states.push(s),e=>events.push(e));
@@ -55,4 +55,15 @@ test('every command carries a distinct id and epoch and only its matching ack se
  assert.notEqual(n.messages[1].id,n.messages[2].id);assert.equal(n.messages[1].epoch,h.player.epoch);
  n.port.onmessage({data:{type:'ack',id:n.messages[1].id,epoch:-1,after:{delay:999}}});assert.equal(h.player.pending.size,2);
  n.ack(1);n.ack(2);await Promise.all([first,second]);assert.equal(h.player.pending.size,0);h.player.stop();
+});
+test('native source pause invalidates ingestion and Resume restarts that same media source',async()=>{
+ const h=harness();await connect(h);const a=h.audios[0],n=h.nodes[0];let resumed=0;
+ a.paused=true;a.onpause();assert.equal(h.events.at(-1),'source-paused');assert.equal(n.messages.at(-1).type,'interrupt');n.ack(n.messages.length-1);
+ a.play=()=>{resumed++;a.paused=false;return Promise.resolve();};await h.player.resumeContext();assert.equal(resumed,1);h.player.stop();
+});
+test('startup timeout also covers a hung worklet module and closes its source',async()=>{
+ const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{t.cleared=true;}});
+ const started=h.player.start('https://fixture/stream');const rejection=assert.rejects(started,/source-timeout/);
+ const deadline=timers.find(t=>t.ms===20000);deadline.fn();await rejection;
+ assert.equal(h.contexts[0].closed,true);assert.equal(h.audios[0].paused,true);assert.equal(deadline.cleared,true);
 });

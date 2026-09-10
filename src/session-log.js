@@ -3,7 +3,7 @@ export const REASONS = ['unspecified', 'initial', 'commercial', 'drift', 'interr
 export const PROVIDERS = ['unspecified', 'youtube-tv', 'cable', 'antenna', 'other'];
 export const OUTPUTS = ['unspecified', 'phone', 'wired', 'bluetooth', 'other'];
 const ACTIONS = ['pause', 'nudge', 'delay', 'live', 'hold', 'complete', 'cancel', 'confirm'];
-const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-error', 'context-interrupted', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
+const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-interrupted', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
 const cleanState = (state) => {
   const value = {};
   for (const key of ['delay', 'available', 'receivedSeconds', 'renderedSeconds', 'contextSeconds'])
@@ -32,7 +32,8 @@ export class SessionLog {
     if (!this.session || !EVENTS.includes(type)) return;
     const event = { sequence: ++this.sequence, type, utc: this.utc(), elapsedMs: Math.max(0, this.now() - this.origin) };
     // Export data is constructed from an allowlist, never serialized from browser errors or source objects.
-    for (const key of ['commandId', 'epoch', 'requestedValue', 'episodeId']) if (Number.isFinite(details[key])) event[key] = details[key];
+    for (const key of ['commandId', 'epoch', 'episodeId']) if (Number.isFinite(details[key])) event[key] = details[key];
+    if (Number.isFinite(details.requestedValue) || typeof details.requestedValue === 'boolean') event.requestedValue = details.requestedValue;
     for (const key of ['action']) if (ACTIONS.includes(details[key])) event[key] = details[key];
     if (REASONS.includes(details.reason)) event.reason = details.reason;
     if (['applied', 'holding', 'unavailable', 'unknown'].includes(details.result)) event.result = details.result;
@@ -57,7 +58,7 @@ export class SessionLog {
   }
   acknowledge(action, ack) {
     this.add('ack', { action, commandId: ack.id, epoch: ack.epoch, result: ack.result,
-      before: ack.before, after: ack.after, episodeId: this.episode?.id });
+      before: ack.before, after: { ...ack.after, contextSeconds: ack.contextSeconds }, episodeId: this.episode?.id });
   }
   confirm(state, reason) {
     if (!state || state.paused || state.holding || !state.ingesting) return false;
@@ -118,7 +119,7 @@ export class SessionLog {
     // In-memory state wins when a storage write failed.
     for (const [id, value] of this.memory) records.set(id, value);
     return [...records.values()].flatMap(value => {
-      try { const item = JSON.parse(value); return item.schemaVersion === 1 && Array.isArray(item.events) ? [item] : []; }
+      try { const item = JSON.parse(value); return item && item.schemaVersion === 1 && typeof item.id === 'string' && typeof item.startedAt === 'string' && Number.isFinite(Date.parse(item.startedAt)) && Array.isArray(item.events) ? [item] : []; }
       catch { return []; }
     }).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
@@ -130,7 +131,11 @@ export class SessionLog {
   }
   clear() {
     if (this.session) return false;
-    for (const item of this.list()) { try { this.storage?.removeItem(PREFIX + item.id); } catch { this.warnMemory(); return false; } }
+    try {
+      const keys = [];
+      for (let i = 0; i < this.storage?.length; i++) { const key = this.storage.key(i); if (key?.startsWith(PREFIX)) keys.push(key); }
+      for (const key of keys) this.storage.removeItem(key);
+    } catch { this.warnMemory(); return false; }
     this.memory.clear(); return true;
   }
 }
