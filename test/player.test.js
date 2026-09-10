@@ -67,3 +67,17 @@ test('startup timeout also covers a hung worklet module and closes its source',a
  const deadline=timers.find(t=>t.ms===20000);deadline.fn();await rejection;
  assert.equal(h.contexts[0].closed,true);assert.equal(h.audios[0].paused,true);assert.equal(deadline.cleared,true);
 });
+test('command timeout closes the epoch so a late acknowledgment cannot revive or mutate playback',async()=>{
+ const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});await connect(h);
+ const node=h.nodes[0],handler=node.port.onmessage,epoch=h.player.epoch;
+ const command=h.player.command('nudge',1),rejection=assert.rejects(command,/timeout/);
+ timers.filter(t=>t.ms===2500 && !t.cleared).at(-1).fn();await rejection;
+ assert.ok(h.player.epoch>epoch);assert.equal(h.contexts[0].closed,true);assert.equal(h.player.state,null);
+ handler({data:{type:'ack',id:node.messages.at(-1).id,epoch,after:{delay:99}}});assert.equal(h.player.state,null);assert.equal(h.states.at(-1),null);
+});
+test('hung resume releases the operation by closing its source after a bounded deadline',async()=>{
+ const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});await connect(h);
+ h.contexts[0].resume=()=>new Promise(()=>{});
+ const resumed=h.player.resumeContext(),rejection=assert.rejects(resumed,/resume-timeout/);
+ timers.find(t=>t.ms===5000).fn();await rejection;assert.equal(h.contexts[0].closed,true);assert.equal(h.events.at(-1),'resume-failed');assert.equal(h.states.at(-1),null);
+});

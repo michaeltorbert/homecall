@@ -27,7 +27,8 @@ const player = new Player(update, event => {
       'source-error': 'This stream could not play. Reconnect or try the official player; availability can depend on broadcast rights or location.',
       'context-interrupted': 'Phone audio was interrupted. Press Resume audio, then check alignment.',
       'engine-error': 'The audio engine stopped. Reconnect to start a fresh buffer.',
-      'command-timeout': 'The timing change could not be confirmed. Reconnect if controls stay unresponsive.',
+      'command-timeout': 'Audio disconnected because a timing change could not be confirmed. Reconnect to begin with a fresh buffer.',
+      'resume-failed': 'Audio could not resume. Reconnect when your phone is ready for playback.',
       'buffer-overrun': 'The held audio reached the 3-minute limit. Playback is paused; choose a new sync point.'
     };
     sourceStatus = event === 'buffer-overrun' ? 'Buffer limit reached' : 'Check playback';
@@ -35,26 +36,30 @@ const player = new Player(update, event => {
   }
   render();
 });
-function update(value) { state = value; render(); }
+function update(value) {
+  if (value === null && active) { log.end(state); active = false; sourceStatus = 'Disconnected'; refreshSessions(); }
+  state = value; render();
+}
 function render() {
   const ready = active && !!state && !connecting;
   const holding = !!state?.holding;
+  const positionReady = ready && player.context?.state === 'running';
   $('status').textContent = connecting ? 'Connecting…' : sourceStatus;
   $('connect').textContent = active ? 'Reconnect audio' : `Play ${teams[selected].name} audio`;
   $('connect').disabled = connecting;
   $('stop').disabled = !active && !connecting;
   $('pause').disabled = !ready || holding || specialPending;
   $('pause').textContent = state?.paused || player.audio?.paused || player.context?.state !== 'running' ? 'Resume audio' : 'Pause audio';
-  $('hold').disabled = !ready || specialPending || (!holding && (state.paused || !state.ingesting));
+  $('hold').disabled = !positionReady || specialPending || (!holding && (state.paused || !state.ingesting));
   $('hold').textContent = holding ? 'I see it on TV · resume audio' : 'I heard the play · hold audio';
   $('cancel').hidden = !holding;
-  $('cancel').disabled = specialPending;
+  $('cancel').disabled = !positionReady || specialPending;
   $('sync-help').textContent = holding ? 'Audio is held while the buffer keeps filling. Tap when that same play appears on TV.' : 'When the call comes before the picture, tap as you hear a distinct play. Tap again when you see it on TV.';
   $('confirm').disabled = !ready || holding || state.paused || !state.ingesting || pending > 0 || player.context?.state !== 'running';
   $('alignment').textContent = log.confirmed && !needsCheck ? 'You marked it aligned' : 'Check alignment';
-  $('scrub').disabled = !ready || holding || specialPending;
-  $('live').disabled = !ready || holding || specialPending;
-  document.querySelectorAll('[data-nudge]').forEach(button => { button.disabled = !ready || holding || specialPending; });
+  $('scrub').disabled = !positionReady || holding || specialPending;
+  $('live').disabled = !positionReady || holding || specialPending;
+  document.querySelectorAll('[data-nudge]').forEach(button => { button.disabled = !positionReady || holding || specialPending; });
   $('delay').textContent = (state?.delay || 0).toFixed(2);
   $('buffer').textContent = state ? `${state.available.toFixed(1)} s of history available · ${state.paused ? 'audio paused' : 'up to 180 s'}` : 'History fills as you listen · up to 3 minutes';
   if (!scrubbing) {
@@ -120,17 +125,17 @@ async function command(action, value) {
     log.acknowledge(action, ack);
     if (ack.result !== 'applied') { notice('That control is not available in the current playback state.'); return; }
     if (action === 'confirm') {
-      needsCheck = !log.confirm(ack.after, $('reason').value);
+      needsCheck = !log.confirm({ ...ack.after, contextSeconds: ack.contextSeconds }, $('reason').value);
       if (!needsCheck) notice('Alignment marked. Check again after a break or interruption.');
     } else if (action === 'hold') notice('Now watch the TV. Tap again when that same play appears.');
     else if (action === 'complete') notice('Audio resumed at your sync point. Fine-tune if needed, then tap Sounds aligned.');
     else if (action === 'cancel') notice('Match canceled. Restored the delay you had before holding audio. Check alignment.');
     else if ((action === 'nudge' && value < 0 || action === 'live' || action === 'delay') && ack.after.delay < 0.01)
       notice('At incoming audio. If the call still trails the picture, pause your TV until it catches up.');
-    else if (action === 'nudge' && Math.abs(ack.after.delay - ack.before.delay - value) > 0.02)
+    else if ((action === 'nudge' && Math.abs(ack.after.delay - ack.before.delay - value) > 0.02) || (action === 'delay' && Math.abs(ack.after.delay - value) > 0.02))
       notice('Reached the available history limit. The log records the adjustment actually applied.');
   } catch {
-    if (mine === generation) { log.boundary('command-failed', state); notice('That change could not be confirmed. Check playback or reconnect.'); }
+    if (mine === generation) { log.boundary('command-failed', state); notice(player.context ? 'That change could not be confirmed. Check playback or reconnect.' : 'Audio disconnected because the change could not be confirmed. Press Play to reconnect.'); }
   } finally {
     if (mine === generation) { pending--; if (special) specialPending = false; render(); }
   }

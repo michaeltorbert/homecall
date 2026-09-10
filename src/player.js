@@ -76,17 +76,27 @@ export class Player {
     if (!this.node) return Promise.reject(new Error('disconnected'));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id); this.onEvent('command-timeout'); reject(new Error('timeout'));
+        this.pending.delete(id);
+        // Close the epoch: a queued command must never take effect later in an apparently healthy session.
+        this.onEvent('command-timeout'); this.stop(); this.onState(null); reject(new Error('timeout'));
       }, 2500);
       this.pending.set(id, { resolve, reject, timer });
       this.node.port.postMessage({ id, epoch, type, value });
     });
   }
   async resumeContext() {
-    const tasks = [];
-    if (this.context) tasks.push(this.context.resume());
-    if (this.audio?.paused && !this.audio.ended) tasks.push(this.audio.play());
-    await Promise.all(tasks);
+    const epoch = this.epoch, tasks = [];
+    let timer;
+    try {
+      if (this.context) tasks.push(this.context.resume());
+      if (this.audio?.paused && !this.audio.ended) tasks.push(this.audio.play());
+      await Promise.race([Promise.all(tasks), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('resume-timeout')), 5000);
+      })]);
+    } catch (error) {
+      if (epoch === this.epoch) { this.onEvent('resume-failed'); this.stop(); this.onState(null); }
+      throw error;
+    } finally { clearTimeout(timer); }
   }
   setVolume(value) { this.volume = value; if (this.gain) this.gain.gain.value = value; }
   stop() {

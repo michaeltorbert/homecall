@@ -3,7 +3,7 @@ export const REASONS = ['unspecified', 'initial', 'commercial', 'drift', 'interr
 export const PROVIDERS = ['unspecified', 'youtube-tv', 'cable', 'antenna', 'other'];
 export const OUTPUTS = ['unspecified', 'phone', 'wired', 'bluetooth', 'other'];
 const ACTIONS = ['pause', 'nudge', 'delay', 'live', 'hold', 'complete', 'cancel', 'confirm'];
-const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-interrupted', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
+const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-interrupted', 'resume-failed', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
 const cleanState = (state) => {
   const value = {};
   for (const key of ['delay', 'available', 'receivedSeconds', 'renderedSeconds', 'contextSeconds'])
@@ -100,7 +100,7 @@ export class SessionLog {
       const records = this.list();
       for (const old of records.slice(this.maxSessions)) { this.storage.removeItem(PREFIX + old.id); this.memory.delete(old.id); }
       if (records.length > this.maxSessions && !this.retentionWarned) {
-        this.retentionWarned = true; this.onWarning('Only the 10 most recent logs are kept. Export any you want to save.');
+        this.retentionWarned = true; this.onWarning(`Only the ${this.maxSessions} most recent logs are kept. Export any you want to save.`);
       }
     } catch { this.warnMemory(); }
     while (this.memory.size > this.maxSessions) this.memory.delete(this.memory.keys().next().value);
