@@ -20,7 +20,7 @@ export class SessionLog {
   start(team, sourceId, mode = 'live', provider = 'unspecified', output = 'unspecified') {
     if (this.session) this.end();
     this.origin = this.now(); this.sequence = 0; this.episode = null; this.confirmed = false; this.observation = null;
-    this.session = { schemaVersion: 1, app: 'myStream', build: this.build,
+    this.session = { schemaVersion: 1, app: 'Homecall', build: this.build,
       id: this.id(), team: ['duke', 'miami', 'vt'].includes(team) ? team : 'unknown',
       sourceId: ['duke-leanstream', 'miami-wqam', 'vt-leanstream', 'test-tone'].includes(sourceId) ? sourceId : 'unknown',
       mode: mode === 'demo' ? 'demo' : 'live', provider: PROVIDERS.includes(provider) ? provider : 'unspecified',

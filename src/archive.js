@@ -1,5 +1,5 @@
 import { teams } from './teams.js';
-import { filterReplays, seekReplay, stopReplay } from './replay.js';
+import { filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
 export function setupArchive({ stopLive, selectedTeam }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
@@ -38,8 +38,8 @@ export function setupArchive({ stopLive, selectedTeam }) {
   function render(reset = false) {
     const key = $('archive-team').value, team = teams[key], source = catalog?.schools[key];
     $('archive-official').href = source?.source || team.official;
-    if (reset) {
-      stop(); $('archive-sport').value = ''; $('archive-year').value = '';
+    if (reset) { stop(); $('archive-sport').value = ''; $('archive-year').value = ''; }
+    {
       const items = source?.items || [];
       options('archive-sport', [...new Set(items.map(x => x.sport))].sort(), 'All sports');
       options('archive-year', [...new Set(items.map(x => x.start.slice(0, 4)))].sort().reverse(), 'All years');
@@ -90,10 +90,9 @@ export function setupArchive({ stopLive, selectedTeam }) {
     try {
       const response = await fetch('./archive.json', { cache: 'no-cache', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw Error();
-      const data = await response.json();
-      if (!data.schools || !data.checkedAt) throw Error();
+      const data = validateCatalog(await response.json());
       if (mine !== loadGeneration) return;
-      catalog = data; catalogError = false; render(true);
+      catalog = data; catalogError = false; render();
     } catch { if (mine === loadGeneration) { catalogError = true; $('archive-note').textContent = 'The archive catalog could not load. Try again or visit the official site.'; } }
     finally { if (mine === loadGeneration) $('archive-retry').disabled = false; }
   }
