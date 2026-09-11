@@ -1,6 +1,6 @@
 # myStream local instructions
 
-Target repository: https://github.com/michaeltorbert/mystream
+Target repository: https://github.com/michaeltorbert/homecall
 GitHub App profile for Codex writes: games-codex (codex-bot-mt).
 All GitHub writes use the appropriate App identity; never the personal account.
 Implementation author marker: <!-- ai-author: codex --> for Codex-authored PRs.

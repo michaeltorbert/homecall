@@ -6,9 +6,13 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "start": "node server.mjs",
-    "build": "vite build"
+    "refresh:archive": "node scripts/refresh-archive.mjs",
+    "build": "node scripts/refresh-archive.mjs && vite build"
   },
   "dependencies": {
     "vite": "8.2.2"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
   }
 }

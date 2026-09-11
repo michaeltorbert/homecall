@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { fetchDukeSchedule } from './lib/duke-source.mjs';
 const root=fileURLToPath(new URL('./dist/',import.meta.url));
-const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm'};
+const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.json':'application/json'};
 let cached;
 const server=http.createServer(async(req,res)=>{
   if (req.url==='/api/duke') {
@@ -19,7 +19,7 @@ const server=http.createServer(async(req,res)=>{
   }
   try {
     const pathname=new URL(req.url,'http://127.0.0.1').pathname;
-    if(pathname!=='/' && !/^\/assets\/[A-Za-z0-9_.-]+$/.test(pathname)) {res.writeHead(404);res.end('Not found');return;}
+    if(pathname!=='/' && pathname!=='/archive.json' && !/^\/assets\/[A-Za-z0-9_.-]+$/.test(pathname)) {res.writeHead(404);res.end('Not found');return;}
     const filename=pathname==='/'?'index.html':pathname.slice(1);
     const content=await readFile(path.join(root,filename));
     res.writeHead(200,{'Content-Type':types[path.extname(filename)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-cache'});res.end(content);

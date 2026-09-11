@@ -1,3 +1,4 @@
+import { setupArchive } from './archive.js';
 import { teams } from './teams.js';
 import { Player } from './player.js';
 import { SessionLog } from './session-log.js';
@@ -224,3 +225,5 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => { log.boundary('hidden', state); });
 setInterval(() => { if (active && state) log.heartbeat(state, !document.hidden && player.context?.state === 'running'); }, 30000);
 teamChanged(); refreshSessions(); render();
+
+setupArchive({ stopLive: disconnect, selectedTeam: () => selected });

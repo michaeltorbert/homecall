@@ -1,4 +1,4 @@
-# myStream
+# Homecall
 
 A small manual-sync internet audio player for Duke, Miami and Virginia Tech. Open the site, choose your team, and delay the call to match your TV. No account, microphone, camera or recognition model is required.
 
@@ -25,7 +25,7 @@ Several nudges before another alignment mark form one confirmed adjustment episo
 - Miami: [official radio affiliates](https://miamihurricanes.com/miami-hurricanes-football-radio-affiliates/), [WQAM official player](https://www.audacy.com/stations/wqam), public player-configured Amperwave channel.
 - Virginia Tech: [official sports network](https://hokiesports.com/virginia-tech-sports-network), published WMT/Leanstream channel.
 
-All three endpoints returned audio and allowed the site Origin during September 10, 2026 source probes. That proves transport availability at the time, not game content, geographic rights, or successful playback on a particular phone. Channels remain selectable independently of stale or unavailable schedule metadata. Replays are deferred in this manual release. The optional local Duke schedule adapter remains available for future use.
+All three endpoints returned audio and allowed the site Origin during September 10, 2026 source probes. That proves transport availability at the time, not game content, geographic rights, or successful playback on a particular phone. Channels remain selectable independently of stale or unavailable schedule metadata. The Archive tab provides official Duke and Virginia Tech recordings. Miami currently links to its official listening site. The optional local Duke schedule adapter remains available for future use.
 
 ## Develop
 
@@ -44,7 +44,7 @@ Open `http://127.0.0.1:4178/`. Tests use generated samples and mocked media boun
 
 The repository's Pages workflow tests and builds on pushes to `main`; it deploys the resulting static assets to GitHub Pages. Enable **Settings → Pages → Source → GitHub Actions** once. See [GitHub's custom workflow instructions](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
-Expected URL after a successful deployment: `https://michaeltorbert.github.io/mystream/`. Do not treat this as live until the workflow succeeds and the deployed assets are verified.
+Expected URL after a successful deployment: `https://michaeltorbert.github.io/homecall/`. Do not treat this as live until the workflow succeeds and the deployed assets are verified.
 
 HTTPS is required on remote devices for the audio worklet and sharing features. Foreground iPhone/Android, Bluetooth, actual station playback, share-sheet delivery and commercial return behavior remain real-device acceptance checks. Automated browser inspection in this development environment is blocked by managed security policy; no alternate browser bypass was used.
 
@@ -53,3 +53,9 @@ HTTPS is required on remote devices for the audio worklet and sharing features. 
 The original Duke automatic-sync prototype is preserved in commit `549a719b2a188f8166a8a50b586fe475d26b8bd1`. Its recognition code, experiments and model dependencies were removed from the active manual release, not erased from history. Private recordings/transcripts were never uploaded.
 
 The manual plan received available-seat agreement from Codex, Claude, Grok and Gemini. Kimi was unavailable, so this is not full-roster consensus. Planning approval is separate from implementation review. See `PLAN.md`, `SYNC-DESIGN.md`, `REQUIREMENTS.md` and `BACKLOG.md` for the current contract and remaining checks.
+
+## Archive
+
+Choose Archive, then a school, sport, and year. Native audio controls provide play/pause and a seekable timeline, with playback speed and fine position adjustments. Pause at a distinctive play, then resume when it appears in a TV replay. Switching school or leaving Archive stops the recording; opening Archive disconnects live audio. No scores are imported; provider titles may contain spoilers. Game recordings are not guaranteed to contain the complete game.
+
+The build fetches official Duke and Virginia Tech catalog metadata into ignored `public/archive.json`; no recordings are downloaded or hosted. Pages refreshes on deployment and every six hours. Source failures are isolated per school and shown as unavailable, with an official link. Refresh list reloads the published catalog, whose check time is shown. An unavailable source needs a later successful deployment refresh. Miami has no verified in-app archive feed. Local build requires network access for fresh listings; an offline build shows unavailable sources. Archive playback does not use or produce live-sync test logs.
