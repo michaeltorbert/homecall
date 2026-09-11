@@ -65,3 +65,19 @@ test('same recording retries, resume and hold ignore stale play failures; select
   h.$('replay-hold').click();failures[3](Error('interrupted by pause'));await settle();
   assert.match(h.$('replay-status').textContent,/paused at the play/);
 });
+test('refresh preserves playback and filters; Live directly stops playback; Home and End navigate',async t=>{
+  const h=harness(t);await settle();h.$('archive-tab').click();
+  h.$('archive-sport').value='Football';h.$('archive-sport').onchange();
+  h.$('archive-list').querySelector('button').click();
+  Object.defineProperty(h.audio,'currentTime',{value:42,writable:true});
+  const before=h.counts();h.$('archive-retry').click();await settle();
+  assert.deepEqual(h.counts(),before);assert.equal(h.audio.currentTime,42);assert.equal(h.$('archive-sport').value,'Football');
+  h.$('live-tab').click();assert.equal(h.audio.hasAttribute('src'),false);assert.equal(h.$('replay-player').hidden,true);
+  h.$('live-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'End'}));assert.equal(document.activeElement.id,'archive-tab');
+  h.$('archive-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'Home'}));assert.equal(document.activeElement.id,'live-tab');
+});
+test('malformed catalog is rejected before becoming active and school changes remain usable',async t=>{
+  const h=harness(t,async()=>({ok:true,json:async()=>({checkedAt:'2026-09-11',schools:{duke:{status:'ready',source:'https://duke.leanplayer.com/',items:[{...item,start:null}]}}})}));
+  await settle();h.$('archive-tab').click();assert.match(h.$('archive-note').textContent,/could not load/);
+  h.$('archive-team').value='miami';assert.doesNotThrow(()=>h.$('archive-team').onchange());
+});

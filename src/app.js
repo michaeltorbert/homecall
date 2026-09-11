@@ -194,15 +194,15 @@ $('copy').onclick = async () => {
 };
 $('download').onclick = () => {
   const url = URL.createObjectURL(new Blob([previewText], { type: 'application/json' }));
-  const link = document.createElement('a'); link.href = url; link.download = `mystream-${previewId}.json`;
+  const link = document.createElement('a'); link.href = url; link.download = `homecall-${previewId}.json`;
   link.click(); setTimeout(() => URL.revokeObjectURL(url), 30000);
   $('share-status').textContent = 'Download requested. Check your browser’s downloads or save menu.';
 };
 $('share').onclick = async () => {
-  const file = new File([previewText], `mystream-${previewId}.json`, { type: 'application/json' });
+  const file = new File([previewText], `homecall-${previewId}.json`, { type: 'application/json' });
   try {
-    if (navigator.canShare?.({ files: [file] })) await navigator.share({ title: 'myStream test log', files: [file] });
-    else if (navigator.share) await navigator.share({ title: 'myStream test log', text: previewText });
+    if (navigator.canShare?.({ files: [file] })) await navigator.share({ title: 'Homecall test log', files: [file] });
+    else if (navigator.share) await navigator.share({ title: 'Homecall test log', text: previewText });
     else { $('share-status').textContent = 'This browser has no share menu. Use Copy or Download instead.'; return; }
     $('share-status').textContent = 'Handed the log to your share app. Your saved copy remains here.';
   } catch (error) { $('share-status').textContent = error.name === 'AbortError' ? 'Sharing canceled. Your log is still saved.' : 'Sharing was unavailable. Use Copy or Download instead.'; }

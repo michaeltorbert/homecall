@@ -1,4 +1,4 @@
-# myStream local instructions
+# Homecall local instructions
 
 Target repository: https://github.com/michaeltorbert/homecall
 GitHub App profile for Codex writes: games-codex (codex-bot-mt).

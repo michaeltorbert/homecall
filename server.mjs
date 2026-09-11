@@ -25,5 +25,5 @@ const server=http.createServer(async(req,res)=>{
     res.writeHead(200,{'Content-Type':types[path.extname(filename)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-cache'});res.end(content);
   } catch {res.writeHead(404);res.end('Build the app with npm run build before starting it.');}
 });
-server.listen(4178,'127.0.0.1',()=>console.log('MyStream: http://127.0.0.1:4178'));
+server.listen(4178,'127.0.0.1',()=>console.log('Homecall: http://127.0.0.1:4178'));
 for(const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>{server.close();process.exit(0);});
