@@ -1,8 +1,10 @@
-name: Test and publish myStream
+name: Test and publish Homecall
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 */6 * * *'
   workflow_dispatch:
 permissions:
   contents: read
