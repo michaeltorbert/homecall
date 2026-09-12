@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { PlaybackMemory } from '../src/playback-memory.js';
 import { SessionLog } from '../src/session-log.js';
-import { teams } from '../src/teams.js';
+import { teams, getSources } from '../src/teams.js';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 const settle=()=>new Promise(r=>setImmediate(r));
@@ -18,7 +18,7 @@ function harness(t) {
   command(type,value){this.lastCommand={type,value};return Promise.resolve({result:'applied',before:{delay:35},after:{delay:35},contextSeconds:1});}
   resumeContext(){return Promise.resolve();}
  }
- Object.assign(w,{PlaybackMemory,SessionLog,teams,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
+ Object.assign(w,{PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
  w.URL.revokeObjectURL=()=>{};w.eval(source);return {w,player,$:id=>w.document.getElementById(id)};
 }
@@ -78,4 +78,56 @@ test('a stale playing snapshot cannot erase a native pause awaiting recovery',as
  h.player.update({delay:35,available:90,paused:false,holding:false,ingesting:true,restoring:null});
  h.player.update({delay:35,available:90,paused:true,holding:false,ingesting:false,restoring:null});
  h.player.audio.paused=false;h.$('pause').click();await settle();assert.equal(h.player.starts.length,2);
+});
+
+test('choosing a backup stops playback, resets delay and logs the actual source',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();
+ h.player.update({delay:35,available:40,paused:false,holding:false,ingesting:true,restoring:null});
+ h.$('feed').value='duke-varsity';h.$('feed').onchange();
+ assert.equal(h.player.audio,null);assert.equal(h.$('pause').disabled,true);
+ assert.equal(h.$('delay').textContent,'0.00');assert.match(h.$('notice').textContent,/Press Play/);
+ assert.match(h.$('official').href,/thevarsitynetwork/);
+ h.$('connect').click();await settle();
+ assert.equal(h.player.starts.at(-1).url,'https://img.leanstream.co/IM3501-MP3');
+ assert.equal(h.player.starts.at(-1).delay,0);
+ h.$('preview').click();assert.equal(JSON.parse(h.$('export').value).sourceId,'duke-varsity');
+ h.player.update({delay:7,available:20,paused:false,holding:false,ingesting:true,restoring:null});
+ h.$('connect').click();await settle();assert.equal(h.player.starts.at(-1).delay,7);
+ assert.equal(JSON.parse(h.w.localStorage.getItem('homecall.position.live.duke-leanstream')).value,35);
+});
+test('returning to a previously delayed source starts fresh after an explicit source switch',async t=>{
+ const h=harness(t);
+ h.$('feed').value='duke-wsjs';h.$('feed').onchange();h.$('connect').click();await settle();
+ h.$('feed').value='duke-leanstream';h.$('feed').onchange();
+ h.$('connect').click();await settle();assert.equal(h.player.starts.at(-1).delay,0);
+ assert.equal(JSON.parse(h.w.localStorage.getItem('homecall.position.live.duke-leanstream')).value,0);
+});
+test('a pending connection cannot overwrite the state of a newly selected affiliate',async t=>{
+ const h=harness(t);let reject;
+ h.player.start=()=>new Promise((_,r)=>{reject=r;});
+ h.$('connect').click();assert.equal(h.$('connect').disabled,true);
+ h.$('feed').value='duke-wccg';h.$('feed').onchange();
+ reject(Error('old source failed'));await settle();
+ assert.equal(h.$('connect').disabled,false);assert.match(h.$('notice').textContent,/Ready for WCCG/);
+ assert.equal(h.$('status').textContent,'Disconnected');
+ assert.match(h.$('official').href,/WCCG/);
+});
+test('failure suggests backups without silently switching stations; retries keep fresh-source delay',async t=>{
+ const h=harness(t);let fail=true;
+ const start=h.player.start.bind(h.player);
+ h.player.start=(url,delay)=>{const result=start(url,delay);return fail?Promise.reject(Error('network')):result;};
+ h.w.localStorage.setItem('homecall.position.live.duke-wtib',JSON.stringify({version:1,value:20,savedAt:Date.now()}));
+ h.$('feed').value='duke-wtib';h.$('feed').onchange();h.$('connect').click();await settle();
+ assert.match(h.$('notice').textContent,/choose another Audio feed/);
+ assert.equal(h.$('feed').value,'duke-wtib');assert.equal(h.player.starts.length,1);
+ fail=false;h.$('connect').click();await settle();assert.equal(h.player.starts.at(-1).delay,0);
+ h.$('preview').click();assert.equal(JSON.parse(h.$('export').value).sourceId,'duke-wtib');
+});
+test('backup controls and official links reset when changing teams',async t=>{
+ const h=harness(t);assert.equal(h.$('feed-picker').hidden,false);assert.equal(h.$('feed').options.length,5);
+ h.$('feed').value='duke-wccg';h.$('feed').onchange();
+ h.$('team').value='miami';h.$('team').onchange();assert.equal(h.$('feed-picker').hidden,true);
+ h.$('connect').click();await settle();assert.equal(h.player.starts.at(-1).url,teams.miami.url);
+ assert.equal(h.$('official').href,teams.miami.official);
+ h.$('team').value='duke';h.$('team').onchange();assert.equal(h.$('feed').value,'duke-leanstream');
 });
