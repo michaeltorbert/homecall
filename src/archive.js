@@ -92,7 +92,11 @@ export function setupArchive({ stopLive, selectedTeam, memory }) {
   };
   $('replay-stop').onclick = stop;
   function restoreBookmark() {
-    if (!current || restorePosition === null || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    if (!current || restorePosition === null) return;
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+      if (playingStarted && failedRestoreAt === null) failedRestoreAt = audio.currentTime;
+      return;
+    }
     if (restorePosition >= audio.duration - 1) { audio.currentTime = 0; restorePosition = null; return; }
     if (restoreAttempts >= 2) { if (failedRestoreAt === null) failedRestoreAt = audio.currentTime; message('Your saved position could not be restored. Choose a position or keep listening to save your new progress.'); return; }
     try { ++restoreAttempts; audio.currentTime = restorePosition; }

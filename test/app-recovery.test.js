@@ -65,3 +65,10 @@ test('demo Resume uses its in-session delay while leaving live preferences untou
  h.$('pause').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'restore',value:5});
  assert.equal(JSON.parse(h.w.localStorage.getItem('homecall.position.live.duke-leanstream')).value,35);
 });
+
+test('recovered native pause does not force a later manual Resume to reconnect',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();h.player.event('source-paused');h.player.event('source-playing');
+ h.player.update({delay:35,available:90,paused:false,holding:false,ingesting:true,restoring:null});
+ h.$('pause').click();await settle();h.player.update({delay:40,available:95,paused:true,holding:false,ingesting:true,restoring:null});
+ h.$('pause').click();await settle();assert.equal(h.player.starts.length,1);assert.deepEqual(h.player.lastCommand,{type:'restore',value:35});
+});

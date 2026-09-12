@@ -38,7 +38,7 @@ export class Player {
     audio.onplaying = () => {
       if (!valid()) return;
       this.mediaPlaying = true;
-      if (this.node) this.command('ingest', ingestion()).catch(() => {});
+      if (this.node && context.state === 'running') this.command('ingest', ingestion()).catch(() => {});
       this.onEvent('source-playing');
     };
     const interrupted = (kind) => {
@@ -78,11 +78,13 @@ export class Player {
       };
       node.onprocessorerror = () => interrupted('engine-error');
       node.connect(gain); gain.connect(context.destination);
+      // Wait for the playback gesture to settle before starting any user-command timeout.
+      await settled;
+      if (!valid()) return;
       // Run the output graph so the restore can be acknowledged before admitting input.
       if (delay > 0) await Promise.race([this.command('restore', delay), deadline]);
       if (!valid()) return;
       source.connect(node);
-      await settled;
       if (valid()) await Promise.race([this.command('ingest', !!this.mediaPlaying), deadline]);
     } catch (error) { if (valid()) this.stop(); throw error; }
     finally { clearTimeout(startupTimer); }

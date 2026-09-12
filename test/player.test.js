@@ -119,3 +119,18 @@ test('media position continuity distinguishes a buffering pause from skipped sou
  a.onplaying();assert.deepEqual(JSON.parse(JSON.stringify(n.messages[2].value)),{playing:true,continuous:true});n.ack(2);
  a.onwaiting();n.ack(3);a.currentTime=15;a.onplaying();assert.equal(n.messages[4].value,true);n.ack(4);h.player.stop();
 });
+
+test('saved-delay startup does not start a command timer until native playback settles',async()=>{
+ const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});
+ const started=h.player.start('https://fixture/stream',35);h.contexts[0].module.resolve();await tick();
+ assert.equal(h.nodes[0].messages.length,0);assert.equal(timers.some(t=>t.ms===2500&&!t.cleared),false);
+ h.audios[0].onplaying();h.audios[0].played.resolve();await tick();
+ // onplaying may also send lifecycle ingestion, but source input is still disconnected.
+ const n=h.nodes[0];for(let i=0;i<n.messages.length;i++)n.ack(i);await tick();
+ n.ack(n.messages.length-1);await started;h.player.stop();
+});
+test('media resuming before its context cannot consume the continuity checkpoint',async()=>{
+ const h=harness();await connect(h);const c=h.contexts[0],a=h.audios[0],n=h.nodes[0];a.currentTime=10;c.state='suspended';c.onstatechange();n.ack(1);
+ a.onplaying();assert.equal(n.messages.length,2);a.currentTime=15;c.state='running';c.onstatechange();
+ assert.equal(n.messages[2].type,'ingest');assert.equal(n.messages[2].value,true);n.ack(2);h.player.stop();
+});

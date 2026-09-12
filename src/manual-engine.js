@@ -8,13 +8,13 @@ export class ManualEngine {
     this.rendered = 0;
     this.overrunReported = false;
     this.restoring = null; this.recoveryDelay = null; this.received = 0;
-    this.userPaused = false; this.gapOffset = 0;
+    this.userPaused = false; this.gapOffset = 0; this.positionLost = false;
   }
   snapshot() {
     const h = this.history;
     return { resumeDelay: Math.min(h.capacity / h.sampleRate, (this.restoring ?? this.recoveryDelay ?? h.delay) + this.gapOffset),
       delay: h.delay, available: h.available, paused: h.paused,
-      canResumePosition: this.recoveryDelay === null && this.restoring === null && h.delay < h.available,
+      canResumePosition: !this.positionLost && this.recoveryDelay === null && this.restoring === null && h.delay < h.available,
       holding: !!this.hold, restoring: this.restoring, ingesting: this.ingesting,
       receivedSeconds: this.received / h.sampleRate, renderedSeconds: this.rendered / h.sampleRate };
   }
@@ -35,7 +35,7 @@ export class ManualEngine {
       if (this.recoveryDelay !== null) this.recoveryDelay = h.delay;
     }
     else if (type === 'live') { this.gapOffset = 0; if (this.restoring !== null) h.paused = false; this.restoring = null; this.recoveryDelay = null; h.setDelay(0); }
-    else if (type === 'pause') { this.userPaused = !!value; h.paused = !!value; }
+    else if (type === 'pause') { if (value && !h.paused) this.positionLost = false; this.userPaused = !!value; h.paused = !!value; }
     else if (type === 'snapshot') { /* Read-only authoritative state. */ }
     else if (type === 'ingest') {
       this.ingesting = value === true || value?.playing === true;
@@ -47,6 +47,7 @@ export class ManualEngine {
         } else {
           const target = Math.min(h.capacity / h.sampleRate, this.recoveryDelay + this.gapOffset);
           this.history = new AudioHistory(h.sampleRate, h.capacity / h.sampleRate);
+          this.positionLost = true;
           this.gapOffset = 0; this.restoring = target; this.history.paused = true;
         }
         this.recoveryDelay = null;
@@ -80,7 +81,7 @@ export class ManualEngine {
     // Count samples actually rendered; seeks and overwritten history are not playback.
     this.rendered += h.rendered - renderedBefore;
     if (h.overrun && !this.overrunReported) {
-      this.overrunReported = true;
+      this.overrunReported = true; this.positionLost = true;
       this.hold = null;
       h.paused = true;
       h.overrun = false;

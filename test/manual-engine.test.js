@@ -118,3 +118,10 @@ test('continuous stalls preserve sample order and reconnect preference across re
  assert.deepEqual(feed(e,[11]).samples,[10]);assert.equal(e.snapshot().resumeDelay,1);
  e.command('nudge',.25);assert.equal(e.snapshot().resumeDelay,1.25);
 });
+
+test('discarded paused audio is never offered as the retained-position alternative',()=>{
+ const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');e.command('pause',true);
+ e.command('ingest',true);feed(e,new Array(12).fill(2));feed(e,[3,4]);
+ assert.equal(e.snapshot().paused,true);assert.equal(e.snapshot().canResumePosition,false);
+ e.command('restore',2);feed(e,[5,6]);e.command('pause',true);assert.equal(e.snapshot().canResumePosition,true);
+});

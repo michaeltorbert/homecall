@@ -52,6 +52,7 @@ function update(value) {
   const wasRestoring = state?.restoring != null;
   state = value;
   if (state && active && state.ingesting && !state.paused && !state.holding && state.restoring == null) {
+    sourcePaused = false;
     if (savedDelay === null || Math.abs(savedDelay - (state.resumeDelay ?? state.delay)) > 0.02) {
       savedDelay = state.resumeDelay ?? state.delay; if (liveKey) memory.save('live', liveKey, savedDelay);
     }

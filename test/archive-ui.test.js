@@ -121,3 +121,11 @@ test('failed bookmark restore resumes saving after actual listening progresses',
  h.audio.dispatchEvent(new h.dom.window.Event('playing'));h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.equal(saved.length,0);
  h.audio.currentTime=3;h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.deepEqual(saved.at(-1),['replay','duke:one',3]);
 });
+
+test('unknown recording duration cannot block bookmarks after playback progresses',async t=>{
+ const saved=[];const h=harness(t,undefined,{read:()=>({value:125}),save:(...args)=>saved.push(args)});
+ await settle();h.$('archive-tab').click();h.$('archive-list').querySelector('button').click();
+ Object.defineProperty(h.audio,'duration',{value:Infinity});Object.defineProperty(h.audio,'readyState',{value:1});Object.defineProperty(h.audio,'paused',{value:false});
+ h.audio.dispatchEvent(new h.dom.window.Event('loadedmetadata'));h.audio.dispatchEvent(new h.dom.window.Event('playing'));
+ h.audio.currentTime=3;h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.deepEqual(saved.at(-1),['replay','duke:one',3]);
+});
