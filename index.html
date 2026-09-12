@@ -3,7 +3,8 @@
 <body><header><a class="brand" href="./">Homecall<span>YOUR TEAM’S CALL</span></a><span class="badge">Manual sync · v1</span></header>
 <nav class="mode-tabs" role="tablist" aria-label="Broadcast mode"><button id="live-tab" role="tab" aria-selected="true" aria-controls="live-panel">Live</button><button id="archive-tab" role="tab" aria-selected="false" aria-controls="archive-panel" tabindex="-1">Archive</button></nav>
 <main><section id="live-panel" role="tabpanel" aria-labelledby="live-tab" class="console">
-<div class="team-row"><label for="team">Your team</label><select id="team"><option value="duke">Duke · Blue Devils</option><option value="miami">Miami · Hurricanes</option><option value="vt">Virginia Tech · Hokies</option></select></div>
+<div class="team-row"><label for="team">Your team</label><select id="team"><option value="duke">Duke · Blue Devils</option><option value="miami">Miami · Hurricanes</option><option value="vt">Virginia Tech · Hokies</option><option value="gt">Georgia Tech · Yellow Jackets</option></select></div>
+<section id="game-panel" hidden><label for="game">Football game</label><select id="game" disabled></select><p id="game-note" role="status"></p><button id="game-refresh">Refresh games</button></section>
 <div class="station-row"><div><p class="eyebrow">INTERNET AUDIO</p><h1 id="station">Duke Sports Network</h1></div><span id="status" role="status">Disconnected</span></div>
 <div class="transport"><button id="connect" class="primary">Play Duke audio</button><button id="pause" disabled>Pause audio</button><button id="stop" disabled aria-label="Disconnect audio">Stop</button></div>
 <button id="resume-position" hidden>TV paused too? Resume where I stopped</button>

@@ -30,7 +30,7 @@ export function setupArchive({ stopLive, selectedTeam, memory }) {
     $('live-panel').hidden = mode !== 'live';
     $('archive-panel').hidden = mode !== 'archive';
     $('live-sidebar').hidden = mode !== 'live';
-    if (mode === 'archive') { $('archive-team').value = selectedTeam(); render(true); }
+    if (mode === 'archive') { $('archive-team').value = [...$('archive-team').options].some(o => o.value === selectedTeam()) ? selectedTeam() : 'duke'; render(true); }
   }
   for (const name of ['live', 'archive']) {
     $(`${name}-tab`).onclick = () => selectMode(name);

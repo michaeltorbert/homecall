@@ -10,6 +10,7 @@
     "build": "node scripts/refresh-archive.mjs && vite build"
   },
   "dependencies": {
+    "hls.js": "^1.7.3",
     "vite": "8.2.2"
   },
   "devDependencies": {

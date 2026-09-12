@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { homestreamCatalog } from './lib/homestream-catalog.mjs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -7,6 +8,16 @@ const root=fileURLToPath(new URL('./dist/',import.meta.url));
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.json':'application/json'};
 let cached;
 const server=http.createServer(async(req,res)=>{
+  if (req.url.startsWith('/api/homestream/')) {
+    if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
+    res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
+    try {
+      const result = await homestreamCatalog(req.url);
+      res.statusCode = result === null ? 404 : 200;
+      res.end(JSON.stringify(result ?? { error: 'Unknown catalog route' }));
+    } catch { res.statusCode = 502; res.end(JSON.stringify({ error: 'Catalog unavailable' })); }
+    return;
+  }
   if (req.url==='/api/duke') {
     res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
     try {
@@ -25,5 +36,6 @@ const server=http.createServer(async(req,res)=>{
     res.writeHead(200,{'Content-Type':types[path.extname(filename)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-cache'});res.end(content);
   } catch {res.writeHead(404);res.end('Build the app with npm run build before starting it.');}
 });
-server.listen(4178,'127.0.0.1',()=>console.log('Homecall: http://127.0.0.1:4178'));
+const port = Number(process.env.PORT || 4178);
+server.listen(port,'127.0.0.1',()=>console.log(`Homecall: http://127.0.0.1:${port}`));
 for(const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>{server.close();process.exit(0);});

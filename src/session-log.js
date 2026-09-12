@@ -21,8 +21,8 @@ export class SessionLog {
     if (this.session) this.end();
     this.origin = this.now(); this.sequence = 0; this.episode = null; this.confirmed = false; this.observation = null;
     this.session = { schemaVersion: 1, app: 'Homecall', build: this.build,
-      id: this.id(), team: ['duke', 'miami', 'vt'].includes(team) ? team : 'unknown',
-      sourceId: ['duke-leanstream', 'miami-wqam', 'vt-leanstream', 'test-tone'].includes(sourceId) ? sourceId : 'unknown',
+      id: this.id(), team: ['duke', 'miami', 'vt', 'gt'].includes(team) ? team : 'unknown',
+      sourceId: ['duke-leanstream', 'miami-wqam', 'vt-leanstream', 'gt-homestream', 'test-tone'].includes(sourceId) ? sourceId : 'unknown',
       mode: mode === 'demo' ? 'demo' : 'live', provider: PROVIDERS.includes(provider) ? provider : 'unspecified',
       output: OUTPUTS.includes(output) ? output : 'unspecified', startedAt: this.utc(), endedAt: null,
       truncatedEvents: 0, userConfirmedObservedSeconds: 0, observedPlaybackSeconds: 0, confirmedEpisodes: 0, events: [] };

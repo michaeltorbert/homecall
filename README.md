@@ -71,3 +71,33 @@ Refresh list reloads the published catalog while preserving the current replay a
 Live streams save the chosen delay on this browser, separately for each source. Reconnecting restores that delay relative to incoming audio, without adding time spent disconnected. A fresh connection must collect enough audio first (a 35-second delay needs 35 seconds of incoming audio); the status shows progress and Live skips the wait. Continuous stalls keep the read position without replaying heard audio; drained buffer time is carried separately into the saved reconnect preference. Recovery retains history when the media position indicates a contiguous pause; a jump or unknown media position discards discontinuous history and refills the prior delay. Restoration does not prove alignment with the TV or the broadcaster's live edge.
 
 Resume audio returns to the saved delay. If the TV was paused too, Resume where I stopped uses the retained audio while it remains available. A page reload, reconnect, or overwritten buffer cannot recover discarded audio. Phone interruptions may require a playback tap. Replay recordings remember their individual position; finished recordings start over. Only position values and real-clock save timestamps are stored locally, never audio. These preferences are separate from exportable session logs. Browser storage restrictions may prevent persistence.
+
+### Georgia Tech live games (local catalog service)
+
+Choose **Georgia Tech**, select a football game, and wait for the playlist check
+before pressing Play. The app obtains the anonymous Homestream team list and
+football catalog, matches the returned team ID to the home/away side, and uses
+that side's exact published HTTPS CloudFront address. No dated game URL or
+account token is bundled. A published address is not proof of availability:
+missing URLs, 404 responses, ended playlists and non-advancing playlists have
+separate messages. Refresh games retries discovery.
+
+HLS.js feeds the existing Web Audio/AudioWorklet delay engine; browsers without
+MSE may use native HLS. Pause, hold/match, nudges, volume and the 180-second PCM
+history retain their existing behavior. Saved delays are scoped to each game.
+Reconnect stops playback, refreshes the catalog and rechecks availability; press
+Play again when ready to restore the saved delay with a fresh buffer. Changing
+games stops the previous feed and cancels pending discovery.
+
+Run `npm run build` and `npm start` (or `PORT=4179 npm start`). The Node server
+provides GET-only `/api/homestream/teams` and `/api/homestream/games/<team-id>`
+routes against a fixed upstream host, returning only the fields needed by the
+selector. It does not proxy media or forward credentials. Requests have a
+10-second timeout. Playlist advancement is checked directly in the browser.
+
+**Deployment:** the public catalog currently lacks CORS headers. Static GitHub
+Pages cannot run this Node route, so Georgia Tech discovery requires a hosted
+same-origin equivalent before it will work there. Existing direct radio feeds
+and Archive remain available on static hosting. A catalog error does not
+silently fall back to a dated or unverified stream. This change does not add
+Georgia Tech recordings to Archive or claim automatic TV synchronization.
