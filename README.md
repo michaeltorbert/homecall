@@ -11,6 +11,12 @@ A small manual-sync internet audio player for Duke, Miami and Virginia Tech. Ope
 
 Pause keeps collecting audio for up to three minutes. A buffer overrun cancels a pending match and leaves audio paused. Canceling a match restores the delay from before the first tap relative to the current incoming edge; it skips the abandoned hold. Reconnecting or switching teams discards the previous buffer. If a user timing command cannot be acknowledged, the app disconnects rather than allowing that queued change to apply unexpectedly later; reconnect when ready. The displayed delay is what this app adds, **not total stadium-to-listener latency**.
 
+## Backup feeds
+
+For Duke, use **Audio feed** above Play to choose the network's backup connection or WSJS, WCCG, or WTIB. Changing the feed stops playback. Press Play to start the new feed with a fresh buffer and zero added delay, then check alignment. Reconnecting the same feed restores its own saved delay. Switching teams returns to that team's primary feed; feed selection itself is not saved across reloads.
+
+The network backup is the `img.leanstream.co/IM3501-MP3` address published by [Varsity's Duke player](https://thevarsitynetwork.com/feed/source/oas-1693); it shares the primary's broadcast provider. The three stations are listed among [Duke's affiliates](https://goduke.com/sports/2022/8/6/local-radio-affiliates) and carried postgame interview audio in September 12, 2026 samples. Their programming and availability can change, so the app never automatically switches stations or promises that a game is currently on. WKRX carried postgame during direct sample checks but failed the in-app connection check, so it is not included. The official-player link follows the selected feed, and logs identify that feed without recording its URL.
+
 ## Send a test log from a phone
 
 Open **Share a test log**, preview it, then tap **Share test log** and choose Mail or Messages. If the browser lacks a share menu, **Copy** the complete log and paste it into an email, or **Download** the JSON attachment. Nothing is sent automatically and no recipient is hardcoded. Refresh the preview to include newer adjustments.
@@ -46,7 +52,7 @@ The repository's Pages workflow tests and builds on pushes to `main`; it deploys
 
 Expected URL after a successful deployment: `https://michaeltorbert.github.io/homecall/`. Do not treat this as live until the workflow succeeds and the deployed assets are verified.
 
-HTTPS is required on remote devices for the audio worklet and sharing features. Foreground iPhone/Android, Bluetooth, actual station playback, share-sheet delivery and commercial return behavior remain real-device acceptance checks. Automated browser inspection in this development environment is blocked by managed security policy; no alternate browser bypass was used.
+HTTPS is required on remote devices for the audio worklet and sharing features. Foreground iPhone/Android, Bluetooth, actual station playback, share-sheet delivery and commercial return behavior remain real-device acceptance checks. Desktop browser checks do not replace those real-device acceptance checks.
 
 ## History and review
 

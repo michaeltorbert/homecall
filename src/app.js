@@ -1,6 +1,6 @@
 import { PlaybackMemory } from './playback-memory.js';
 import { setupArchive } from './archive.js';
-import { teams } from './teams.js';
+import { teams, getSources } from './teams.js';
 import { Player } from './player.js';
 import { SessionLog } from './session-log.js';
 import { demoURL } from './demo.js';
@@ -11,6 +11,7 @@ const memory = new PlaybackMemory(storage, text => { $('storage-warning').textCo
 let liveKey = null, savedDelay = null, sourcePaused = false;
 let selected = 'duke';
 try { if (teams[storage?.getItem('mystream.team')]) selected = storage.getItem('mystream.team'); } catch {}
+let selectedSourceId = teams[selected].sourceId, resetSourceDelay = false;
 let state = null, connecting = false, active = false, scrubbing = false, generation = 0, demo = null, pending = 0, specialPending = false;
 let previewText = '', previewId = '', needsCheck = true, sourceStatus = 'Disconnected';
 const build = typeof __APP_BUILD__ === 'string' ? __APP_BUILD__ : 'development';
@@ -29,7 +30,7 @@ const player = new Player(update, event => {
       'source-stalled': 'The source stopped delivering data. Check alignment when it returns.',
       'source-paused': 'Your phone paused the source. Resume audio restores your saved delay; use the TV-paused option only if the picture stopped too.',
       'source-ended': 'The source ended. Reconnect to start a fresh audio buffer.',
-      'source-error': 'This stream could not play. Reconnect or try the official player; availability can depend on broadcast rights or location.',
+      'source-error': connectionHelp(),
       'context-restored': 'Phone audio returned. Restoring playback; check alignment.',
       'context-interrupted': 'Phone audio was interrupted. Press Resume audio, then check alignment.',
       'engine-error': 'The audio engine stopped. Reconnect to start a fresh buffer.',
@@ -92,14 +93,41 @@ function render() {
   $('provider').disabled = $('output').disabled = active;
   for (const id of ['share', 'copy', 'download']) $(id).disabled = !previewText || pending > 0;
 }
+function currentSource() {
+  return getSources(selected).find(source => source.sourceId === selectedSourceId);
+}
+function connectionHelp() {
+  return getSources(selected).length > 1
+    ? 'Audio could not play. Try Play again, choose another Audio feed above, or open the official player.'
+    : 'Audio could not play. Try Play again or open the official player.';
+}
+function showSource() {
+  const source = currentSource();
+  $('station').textContent = source.station; $('official').href = source.official;
+  $('source-note').textContent = source.note || (source.sourceId !== teams[selected].sourceId
+    ? 'Duke affiliate station. Game and postgame coverage can change; check that you hear the broadcast you want.'
+    : selected === 'miami' ? 'WQAM’s live station stream. Scheduled games may be subject to streaming rights and location restrictions; station audio does not prove the game is on air.'
+    : 'Live network channel. Game coverage depends on the broadcaster; an empty or expired schedule does not disable this channel.');
+}
 function teamChanged() {
   disconnect(); selected = $('team').value;
+  selectedSourceId = teams[selected].sourceId; resetSourceDelay = false;
   try { storage?.setItem('mystream.team', selected); } catch {}
-  const team = teams[selected];
+  const team = teams[selected], sources = getSources(selected);
   document.documentElement.style.setProperty('--accent', team.color);
-  $('station').textContent = team.station; $('official').href = team.official;
-  $('source-note').textContent = selected === 'miami' ? 'WQAM’s live station stream. Scheduled games may be subject to streaming rights and location restrictions; station audio does not prove the game is on air.' : 'Live network channel. Game coverage depends on the broadcaster; an empty or expired schedule does not disable this channel.';
-  notice(`Ready for ${team.name}. Keep this page open while listening.`); render();
+  $('feed').replaceChildren();
+  for (const source of sources) {
+    const option = document.createElement('option'); option.value = source.sourceId; option.textContent = source.label;
+    $('feed').append(option);
+  }
+  $('feed').value = selectedSourceId; $('feed-picker').hidden = sources.length < 2;
+  showSource(); notice(`Ready for ${team.name}. Keep this page open while listening.`); render();
+}
+function sourceChanged() {
+  const id = $('feed').value;
+  if (id === selectedSourceId || !getSources(selected).some(source => source.sourceId === id)) return;
+  disconnect(); selectedSourceId = id; resetSourceDelay = true;
+  showSource(); notice(`Ready for ${currentSource().station}. Press Play to start at 0 seconds, then check alignment.`); render();
 }
 function disconnect() {
   ++generation; sourcePaused = false; liveKey = null; savedDelay = null; log.end(state); player.stop();
@@ -110,26 +138,30 @@ function disconnect() {
 async function connect(useDemo = false) {
   disconnect(); const mine = generation;
   active = connecting = true;
-  const team = teams[selected];
-  liveKey = useDemo ? null : team.sourceId;
-  savedDelay = liveKey ? memory.read('live', liveKey)?.value ?? null : null;
+  const source = currentSource();
+  liveKey = useDemo ? null : source.sourceId;
+  savedDelay = liveKey ? resetSourceDelay ? 0 : memory.read('live', liveKey)?.value ?? null : null;
   const restoreDelay = savedDelay ?? 0;
-  log.start(selected, useDemo ? 'test-tone' : team.sourceId, useDemo ? 'demo' : 'live', $('provider').value, $('output').value);
+  log.start(selected, useDemo ? 'test-tone' : source.sourceId, useDemo ? 'demo' : 'live', $('provider').value, $('output').value);
   sourceStatus = 'Connecting'; notice('Connecting to the audio source…');
-  $('station').textContent = useDemo ? 'Timing demo · repeating tones' : team.station;
+  $('station').textContent = useDemo ? 'Timing demo · repeating tones' : source.station;
   refreshSessions(log.session.id); render();
   try {
-    const url = useDemo ? (demo = demoURL()) : team.url;
+    const url = useDemo ? (demo = demoURL()) : source.url;
     const started = player.start(url, restoreDelay);
     if (useDemo && player.audio) player.audio.loop = true;
     await started;
     if (mine !== generation) return;
+    if (!useDemo) {
+      if (resetSourceDelay && liveKey) memory.save('live', liveKey, 0);
+      resetSourceDelay = false;
+    }
     connecting = false; notice(restoreDelay > 0 && !useDemo ? `Restoring your saved ${restoreDelay.toFixed(1)}-second delay. Audio will resume when enough history is available; check alignment. Choose Jump to incoming audio to skip the wait.` : useDemo ? 'Demo only: a tone each second, higher every fifth. Try pause, delay and the two-tap match.' : 'Listen for a distinct play to match. If audio already trails TV, pause the TV.');
   } catch {
     if (mine !== generation) return;
     log.boundary('source-error', state); log.end(state);
     active = connecting = false; state = null; sourceStatus = 'Could not connect';
-    notice('Audio could not start. Use a current browser over HTTPS, try Play again, or open the official player. Source availability varies.');
+    notice(connectionHelp());
     refreshSessions();
   }
   render();
@@ -197,6 +229,7 @@ function preview() {
   } else $('log-summary').textContent = 'Start a listening session to create a log.';
   render();
 }
+$('feed').onchange = sourceChanged;
 $('team').value = selected; $('team').onchange = teamChanged;
 $('connect').onclick = () => connect(); $('demo').onclick = () => connect(true);
 $('stop').onclick = () => { disconnect(); notice('Disconnected. Your saved logs are still available below.'); };
