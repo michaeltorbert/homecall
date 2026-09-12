@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { syncData } from './lib/sync-data.mjs';
 import { homestreamCatalog } from './lib/homestream-catalog.mjs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -8,11 +9,11 @@ const root=fileURLToPath(new URL('./dist/',import.meta.url));
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.json':'application/json'};
 let cached;
 const server=http.createServer(async(req,res)=>{
-  if (req.url.startsWith('/api/homestream/')) {
+  if (req.url.startsWith('/api/homestream/') || req.url.startsWith('/api/sync/')) {
     if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
     res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
     try {
-      const result = await homestreamCatalog(req.url);
+      const result = await (req.url.startsWith('/api/sync/') ? syncData(req.url) : homestreamCatalog(req.url));
       res.statusCode = result === null ? 404 : 200;
       res.end(JSON.stringify(result ?? { error: 'Unknown catalog route' }));
     } catch { res.statusCode = 502; res.end(JSON.stringify({ error: 'Catalog unavailable' })); }

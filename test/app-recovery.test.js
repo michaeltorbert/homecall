@@ -18,7 +18,7 @@ function harness(t, catalogFactory) {
   command(type,value){this.lastCommand={type,value};return Promise.resolve({result:'applied',before:{delay:35},after:{delay:35},contextSeconds:1});}
   resumeContext(){return Promise.resolve();}
  }
- Object.assign(w,{setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,stop(){},setEnabled(){}}),PlaybackMemory,SessionLog,teams,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
+ Object.assign(w,{setupSync:()=>({}),setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,stop(){},setEnabled(){}}),PlaybackMemory,SessionLog,teams,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
  w.URL.revokeObjectURL=()=>{};w.eval(source);return {w,player,get catalog(){return catalog},$:id=>w.document.getElementById(id)};
 }

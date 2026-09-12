@@ -101,3 +101,35 @@ same-origin equivalent before it will work there. Existing direct radio feeds
 and Archive remain available on static hosting. A catalog error does not
 silently fall back to a dated or unverified stream. This change does not add
 Georgia Tech recordings to Archive or claim automatic TV synchronization.
+
+### Sync tab (experimental)
+
+The separate **Sync** tab brings the timestamped prototype into Homecall for
+all schools returned by the public catalog (currently Duke, Georgia Tech,
+Virginia and Auburn). It stops Live/Archive playback when entered and unloads
+its own player and cancels timing requests when left. The original Live PCM
+manual-delay controls remain separate and unchanged.
+
+Select a school/game, wait for feed verification, then Play. Sync shows the
+playing audio's real-world timestamp, local current time, estimated game-clock
+anchor, and earliest/latest anchors inside the current HLS window. Enter a
+quarter and TV clock to seek to the nearest available recorded play. Identical
+clocks can refer to multiple plays; choose the matching description. Outside
+window requests do not move playback. Bounds are not a promise that every
+intermediate clock has a unique mapping. Back/ahead buttons allow manual
+fine-tuning. Timestamp offsets reset when changing games or broadcast teams.
+
+The fixed-host `/api/sync/teams`, `/api/sync/schedule/<team-id>/<year>` and
+`/api/sync/plays/<event-id>` GET routes obtain minimized ESPN team, schedule and
+play data. Matching requires both school names, a nearby game date and exactly
+one event. Play data refreshes every 15 seconds; stale data disables clock
+seeking after 45 seconds. Out-of-order provider timestamps remain explicitly
+unverified, never interpolated into a continuously ticking game clock.
+
+Sync uses HLS.js playback positions, not Live's PCM buffer. In browsers falling
+back to native HLS, audio and manual seeking may work but this implementation
+cannot expose the program timestamp, so game-clock mapping stays unavailable.
+No camera/microphone access, automatic TV sync, audible validation or locked
+screen support is claimed. These server routes need hosting before Sync works
+on static GitHub Pages. Local build and mock tests do not establish real browser
+playback or precise alignment.
