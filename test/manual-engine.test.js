@@ -125,3 +125,9 @@ test('discarded paused audio is never offered as the retained-position alternati
  assert.equal(e.snapshot().paused,true);assert.equal(e.snapshot().canResumePosition,false);
  e.command('restore',2);feed(e,[5,6]);e.command('pause',true);assert.equal(e.snapshot().canResumePosition,true);
 });
+
+test('a native pause after recovery retains the new valid position',()=>{
+ const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');e.command('ingest',true);
+ feed(e,new Array(12).fill(2));feed(e,[3,4]);assert.equal(e.snapshot().paused,false);
+ e.command('interrupt',true);assert.equal(e.snapshot().canResumePosition,true);
+});

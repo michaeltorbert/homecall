@@ -72,3 +72,10 @@ test('recovered native pause does not force a later manual Resume to reconnect',
  h.$('pause').click();await settle();h.player.update({delay:40,available:95,paused:true,holding:false,ingesting:true,restoring:null});
  h.$('pause').click();await settle();assert.equal(h.player.starts.length,1);assert.deepEqual(h.player.lastCommand,{type:'restore',value:35});
 });
+
+test('a stale playing snapshot cannot erase a native pause awaiting recovery',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();h.player.audio.paused=true;h.player.event('source-paused');
+ h.player.update({delay:35,available:90,paused:false,holding:false,ingesting:true,restoring:null});
+ h.player.update({delay:35,available:90,paused:true,holding:false,ingesting:false,restoring:null});
+ h.player.audio.paused=false;h.$('pause').click();await settle();assert.equal(h.player.starts.length,2);
+});

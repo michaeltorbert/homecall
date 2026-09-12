@@ -54,12 +54,13 @@ export class ManualEngine {
       }
     }
     else if (type === 'hold' && !h.paused && this.ingesting) {
-      this.hold = { delay: h.delay, paused: h.paused }; h.paused = true;
+      this.positionLost = false; this.hold = { delay: h.delay, paused: h.paused }; h.paused = true;
     } else if (type === 'complete' && this.hold) { this.hold = null; h.paused = false; }
     else if (type === 'cancel' && this.hold) {
       h.setDelay(this.hold.delay); h.paused = this.hold.paused; this.hold = null;
     } else if (type === 'interrupt' || type === 'invalidate') {
       if (type === 'interrupt') {
+        if (value === true && !h.paused && !this.hold) this.positionLost = false;
         if (value !== true && !h.paused && !this.hold && this.recoveryDelay === null) this.recoveryDelay = h.delay;
         else if (this.restoring !== null) this.recoveryDelay = this.restoring;
         this.ingesting = false;
