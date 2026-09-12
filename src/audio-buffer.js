@@ -28,6 +28,12 @@ export class AudioHistory {
   process(input, output) {
     const frames = output[0].length;
     for (let i = 0; i < frames; i++) {
+      // Read the oldest retained frame before a full ring overwrites its slot.
+      const retained = !this.paused && this.read < this.written;
+      if (retained) {
+        for (let c = 0; c < output.length; c++) output[c][i] = this.channels[Math.min(c, 1)][this.read % this.capacity];
+        this.read++; this.rendered++;
+      }
       // Do not invent incoming audio if a source has disconnected.
       if (input.length && input[0].length > i) {
         for (let c = 0; c < 2; c++) this.channels[c][this.written % this.capacity] = (input[c] || input[0])[i];
@@ -37,6 +43,7 @@ export class AudioHistory {
         this.read = this.written - this.capacity;
         this.overrun = true;
       }
+      if (retained) continue;
       const audible = !this.paused && this.read < this.written;
       for (let c = 0; c < output.length; c++) output[c][i] = audible ? this.channels[Math.min(c, 1)][this.read % this.capacity] : 0;
       if (audible) { this.read++; this.rendered++; }

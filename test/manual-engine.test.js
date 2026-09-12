@@ -59,3 +59,75 @@ test('native source pause holds retained audio rather than silently draining the
  assert.deepEqual(feed(e,[5,6,7,8]).samples,[0,0,0,0]);assert.equal(e.snapshot().delay,.5);assert.equal(e.snapshot().paused,true);
  e.command('ingest',true);e.command('pause',false);assert.deepEqual(feed(e,[9,10]).samples,[3,4]);
 });
+test('saved delay refills silently and resumes at the new incoming edge minus delay', () => {
+ const e=engine(4);e.command('restore',1);
+ assert.deepEqual(feed(e,[1,2]).samples,[0,0]);assert.equal(e.snapshot().restoring,1);
+ assert.deepEqual(feed(e,[3,4]).samples,[0,0]);
+ assert.deepEqual(feed(e,[5,6]).samples,[1,2]);assert.equal(e.snapshot().delay,1);
+ assert.equal(e.snapshot().restoring,null);
+});
+test('source gap discards discontinuous history and restores the original delay, including repeated interruptions', () => {
+ const e=engine(4);feed(e,[1,2,3,4,5,6,7,8]);e.command('delay',1);
+ e.command('interrupt');feed(e,[0,0]);e.command('interrupt');e.command('ingest',true);
+ assert.equal(e.snapshot().restoring,1);assert.equal(e.snapshot().available,0);
+ feed(e,[9,10]);e.command('interrupt');e.command('ingest',true);
+ assert.equal(e.snapshot().restoring,1);assert.equal(e.snapshot().available,0);
+ feed(e,[11,12,13,14]);assert.deepEqual(feed(e,[15,16]).samples,[11,12]);
+ assert.equal(e.snapshot().delay,1);
+});
+test('live skips restoration; pause recovery offers either saved delay or exact retained position', () => {
+ const e=engine(4);e.command('restore',3);feed(e,[1,2]);e.command('live');
+ assert.deepEqual(feed(e,[3,4]).samples,[3,4]);assert.equal(e.snapshot().restoring,null);
+ e.command('delay',.5);e.command('pause',true);feed(e,[5,6,7,8]);
+ e.command('restore',.5);assert.deepEqual(feed(e,[9,10]).samples,[7,8]);
+ e.command('pause',true);feed(e,[11,12]);e.command('pause',false);
+ assert.deepEqual(feed(e,[13,14]).samples,[9,10]);
+});
+test('maximum saved delay survives a render block crossing the capacity boundary', () => {
+ const e=engine(4,2);e.command('restore',2);feed(e,[1,2,3,4,5,6]);
+ assert.equal(feed(e,[7,8,9,10]).event,null);
+ assert.deepEqual(feed(e,[11,12]).samples,[3,4]);assert.equal(e.snapshot().delay,2);
+});
+
+test('contiguous buffering recovery reuses available history instead of refilling',()=>{
+ const e=engine(4);feed(e,[1,2,3,4,5,6,7,8]);e.command('delay',1);e.command('interrupt');feed(e,[0,0]);
+ e.command('ingest',{playing:true,continuous:true});assert.equal(e.snapshot().available,2);
+ assert.deepEqual(feed(e,[9,10]).samples,[7,8]);assert.equal(e.snapshot().delay,.5);assert.equal(e.snapshot().resumeDelay,1);
+});
+
+test('a deliberate pause during a stall survives both contiguous and discontinuous recovery',()=>{
+ for(const recovery of [true,{playing:true,continuous:true}]){
+  const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');e.command('pause',true);
+  e.command('ingest',recovery);feed(e,new Array(12).fill(2));feed(e,[3,4]);assert.equal(e.snapshot().paused,true);
+  e.command('restore',2);feed(e,[5,6]);assert.equal(e.snapshot().paused,false);assert.equal(e.snapshot().delay,2);
+ }
+});
+test('a delay adjustment during a stall replaces the pending recovery target',()=>{
+ for(const action of ['delay','nudge']){
+  const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');
+  const ack=e.command(action,action==='nudge'?1:3);e.command('ingest',{playing:true,continuous:true});feed(e,[2,3]);
+  assert.equal(e.snapshot().delay,ack.after.delay);assert.equal(e.snapshot().delay,3);
+ }
+});
+
+test('continuous stalls preserve sample order and reconnect preference across repeated gaps',()=>{
+ const e=engine(4);feed(e,[1,2,3,4,5,6,7,8]);e.command('delay',1);
+ e.command('interrupt');assert.deepEqual(feed(e,[0,0]).samples,[5,6]);e.command('ingest',{playing:true,continuous:true});
+ assert.deepEqual(feed(e,[9,10]).samples,[7,8]);assert.equal(e.snapshot().resumeDelay,1);
+ e.command('interrupt');assert.deepEqual(feed(e,[0]).samples,[9]);e.command('ingest',{playing:true,continuous:true});
+ assert.deepEqual(feed(e,[11]).samples,[10]);assert.equal(e.snapshot().resumeDelay,1);
+ e.command('nudge',.25);assert.equal(e.snapshot().resumeDelay,1.25);
+});
+
+test('discarded paused audio is never offered as the retained-position alternative',()=>{
+ const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');e.command('pause',true);
+ e.command('ingest',true);feed(e,new Array(12).fill(2));feed(e,[3,4]);
+ assert.equal(e.snapshot().paused,true);assert.equal(e.snapshot().canResumePosition,false);
+ e.command('restore',2);feed(e,[5,6]);e.command('pause',true);assert.equal(e.snapshot().canResumePosition,true);
+});
+
+test('a native pause after recovery retains the new valid position',()=>{
+ const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');e.command('ingest',true);
+ feed(e,new Array(12).fill(2));feed(e,[3,4]);assert.equal(e.snapshot().paused,false);
+ e.command('interrupt',true);assert.equal(e.snapshot().canResumePosition,true);
+});

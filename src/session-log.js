@@ -2,11 +2,11 @@ export const PREFIX = 'mystream.session.';
 export const REASONS = ['unspecified', 'initial', 'commercial', 'drift', 'interruption'];
 export const PROVIDERS = ['unspecified', 'youtube-tv', 'cable', 'antenna', 'other'];
 export const OUTPUTS = ['unspecified', 'phone', 'wired', 'bluetooth', 'other'];
-const ACTIONS = ['pause', 'nudge', 'delay', 'live', 'hold', 'complete', 'cancel', 'confirm'];
-const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-interrupted', 'control-overflow', 'resume-failed', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
+const ACTIONS = ['pause', 'restore', 'nudge', 'delay', 'live', 'hold', 'complete', 'cancel', 'confirm'];
+const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-restored', 'context-interrupted', 'control-overflow', 'resume-failed', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
 const cleanState = (state) => {
   const value = {};
-  for (const key of ['delay', 'available', 'receivedSeconds', 'renderedSeconds', 'contextSeconds'])
+  for (const key of ['resumeDelay', 'restoring', 'delay', 'available', 'receivedSeconds', 'renderedSeconds', 'contextSeconds'])
     if (Number.isFinite(state?.[key])) value[key] = state[key];
   for (const key of ['paused', 'holding', 'ingesting']) if (typeof state?.[key] === 'boolean') value[key] = state[key];
   return value;
@@ -36,7 +36,7 @@ export class SessionLog {
     if (Number.isFinite(details.requestedValue) || typeof details.requestedValue === 'boolean') event.requestedValue = details.requestedValue;
     for (const key of ['action']) if (ACTIONS.includes(details[key])) event[key] = details[key];
     if (REASONS.includes(details.reason)) event.reason = details.reason;
-    if (['applied', 'holding', 'unavailable', 'unknown'].includes(details.result)) event.result = details.result;
+    if (['applied', 'restoring', 'holding', 'unavailable', 'unknown'].includes(details.result)) event.result = details.result;
     if (details.before) event.before = cleanState(details.before);
     if (details.after) event.after = cleanState(details.after);
     if (state) event.state = cleanState(state);
@@ -48,7 +48,7 @@ export class SessionLog {
     this.save();
   }
   request(action, value, commandId, epoch, reason, state) {
-    if (['nudge', 'delay', 'live', 'hold'].includes(action)) {
+    if (['restore', 'nudge', 'delay', 'live', 'hold'].includes(action)) {
       if (!this.episode) this.episode = { id: this.sequence + 1, wasConfirmed: this.confirmed };
       this.confirmed = false;
     }

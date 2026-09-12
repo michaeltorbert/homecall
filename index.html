@@ -6,6 +6,7 @@
 <div class="team-row"><label for="team">Your team</label><select id="team"><option value="duke">Duke · Blue Devils</option><option value="miami">Miami · Hurricanes</option><option value="vt">Virginia Tech · Hokies</option></select></div>
 <div class="station-row"><div><p class="eyebrow">INTERNET AUDIO</p><h1 id="station">Duke Sports Network</h1></div><span id="status" role="status">Disconnected</span></div>
 <div class="transport"><button id="connect" class="primary">Play Duke audio</button><button id="pause" disabled>Pause audio</button><button id="stop" disabled aria-label="Disconnect audio">Stop</button></div>
+<button id="resume-position" hidden>TV paused too? Resume where I stopped</button>
 <div class="delay-display"><p>Audio delay you’ve added</p><div><output id="delay">0.00</output><span>seconds</span></div><p id="buffer">History fills as you listen · up to 3 minutes</p></div>
 <label class="range-label" for="scrub"><span>Delay</span><output id="scrub-label">0.00 s</output></label><input id="scrub" type="range" min="0" max="0" step="0.25" value="0" disabled>
 <div class="nudge-labels"><span>Call is late? Less delay</span><span>Call is early? More delay</span></div>

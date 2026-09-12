@@ -1,12 +1,23 @@
 import { teams } from './teams.js';
 import { filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
-export function setupArchive({ stopLive, selectedTeam }) {
+export function setupArchive({ stopLive, selectedTeam, memory }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
+  let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
+  function savePosition() {
+    // A failed restore must not disable bookmarking for the rest of the listening session.
+    // Wait for actual playback progress so a transient reset to zero cannot erase the old bookmark.
+    if (restorePosition !== null && failedRestoreAt !== null && playingStarted && !audio.paused && audio.currentTime >= failedRestoreAt + 2) {
+      restorePosition = null; failedRestoreAt = null;
+    }
+    if (replayKey && restorePosition === null && Number.isFinite(audio.currentTime) && audio.readyState >= 1 && audio.currentTime !== lastSaved) {
+      lastSaved = audio.currentTime; memory?.save('replay', replayKey, lastSaved);
+    }
+  }
   let catalog = null, current = null, mode = 'live', loadGeneration = 0, catalogError = false, playRequest = 0;
   const message = text => { $('replay-status').textContent = text; };
   function stop() {
-    ++playRequest; stopReplay(audio); current = null; $('replay-player').hidden = true;
+    savePosition(); replayKey = null; restorePosition = null; ++playRequest; stopReplay(audio); current = null; $('replay-player').hidden = true;
   }
   function selectMode(next) {
     if (next === mode) return;
@@ -55,7 +66,7 @@ export function setupArchive({ stopLive, selectedTeam }) {
       detail.textContent = `${item.sport} · ${new Date(item.start).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'America/New_York' })} · ${item.kind}`;
       button.append(title, detail); button.setAttribute('aria-label', `Play ${title.textContent}, ${detail.textContent}`);
       button.onclick = () => {
-        stop(); current = item; $('replay-player').hidden = false;
+        stop(); current = item; replayKey = `${key}:${item.id}`; lastSaved = null; restoreAttempts = 0; playingStarted = false; failedRestoreAt = null; restorePosition = memory?.read('replay', replayKey)?.value ?? null; $('replay-player').hidden = false;
         $('replay-title').textContent = title.textContent; $('replay-audio').src = item.url;
         audio.playbackRate = Number($('replay-speed').value);
         message('Loading recording…');
@@ -71,7 +82,7 @@ export function setupArchive({ stopLive, selectedTeam }) {
   document.querySelectorAll('[data-replay-seek]').forEach(button => {
     button.onclick = () => {
       if (!seekReplay(audio, Number(button.dataset.replaySeek))) message('Wait for the recording to load before adjusting its position.');
-      else message('Position adjusted. Check against the TV replay.');
+      else { restorePosition = null; savePosition(); message('Position adjusted. Check against the TV replay.'); }
     };
   });
   $('replay-hold').onclick = () => { ++playRequest; audio.pause(); message('Audio paused at the play. When you see it on TV, press Resume at this play.'); };
@@ -80,7 +91,38 @@ export function setupArchive({ stopLive, selectedTeam }) {
     audio.play().catch(() => { if (request === playRequest) message('Playback could not resume. Try the audio controls or official site.'); });
   };
   $('replay-stop').onclick = stop;
-  audio.addEventListener('playing', () => message('Playing recording. Pause at a distinctive play to match your TV replay.'));
+  function restoreBookmark() {
+    if (!current || restorePosition === null) return;
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+      if (playingStarted && failedRestoreAt === null) failedRestoreAt = audio.currentTime;
+      return;
+    }
+    if (restorePosition >= audio.duration - 1) { audio.currentTime = 0; restorePosition = null; return; }
+    if (restoreAttempts >= 2) { if (failedRestoreAt === null) failedRestoreAt = audio.currentTime; message('Your saved position could not be restored. Choose a position or keep listening to save your new progress.'); return; }
+    try { ++restoreAttempts; audio.currentTime = restorePosition; }
+    catch { if (restoreAttempts >= 2) failedRestoreAt = audio.currentTime; message('Your saved position could not be restored. Choose a position or keep listening to save your new progress.'); }
+  }
+  function verifyBookmark() {
+    if (restorePosition === null) return;
+    if (Math.abs(audio.currentTime - restorePosition) < 2) {
+      if (!playingStarted) return;
+      const position = restorePosition; restorePosition = null;
+      message(`Resumed at your saved position (${Math.floor(position / 60)}:${String(Math.floor(position % 60)).padStart(2, '0')}).`);
+    } else restoreBookmark();
+  }
+  // Native controls belong to the listener once metadata is available. A manual gesture
+  // cancels a pending automatic seek so retries cannot fight a chosen position.
+  for (const event of ['pointerdown', 'keydown']) audio.addEventListener(event, () => {
+    if (audio.readyState >= 1) { restorePosition = null; failedRestoreAt = null; }
+  });
+  audio.addEventListener('loadedmetadata', restoreBookmark);
+  audio.addEventListener('canplay', verifyBookmark);
+  audio.addEventListener('seeked', verifyBookmark);
+  audio.addEventListener('timeupdate', savePosition);
+  audio.addEventListener('pause', savePosition);
+  document.addEventListener('visibilitychange', savePosition);
+  document.defaultView?.addEventListener('pagehide', savePosition);
+  audio.addEventListener('playing', () => { playingStarted = true; if (restorePosition !== null) verifyBookmark(); else message('Playing recording. Pause at a distinctive play to match your TV replay.'); });
   audio.addEventListener('waiting', () => { if (current) message('Buffering recording…'); });
   audio.addEventListener('error', () => { if (current) message('This recording could not play. It may have moved or be restricted. Try the official site below.'); });
   audio.addEventListener('ended', () => message('Recording finished.'));
