@@ -102,3 +102,22 @@ test('replay bookmark survives a browser resetting the first seek before playing
  h.audio.dispatchEvent(new h.dom.window.Event('playing'));h.audio.currentTime=126;h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));
  assert.deepEqual(saved.at(-1),['replay','duke:one',126]);
 });
+
+test('native audio interaction takes ownership from automatic bookmark retries',async t=>{
+ const saved=[];const h=harness(t,undefined,{read:()=>({value:125}),save:(...args)=>saved.push(args)});
+ await settle();h.$('archive-tab').click();h.$('archive-list').querySelector('button').click();
+ Object.defineProperty(h.audio,'duration',{value:1000});Object.defineProperty(h.audio,'readyState',{value:1});
+ h.audio.dispatchEvent(new h.dom.window.Event('loadedmetadata'));
+ h.audio.dispatchEvent(new h.dom.window.Event('pointerdown'));h.audio.currentTime=300;
+ h.audio.dispatchEvent(new h.dom.window.Event('seeked'));h.audio.dispatchEvent(new h.dom.window.Event('canplay'));
+ assert.equal(h.audio.currentTime,300);h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.deepEqual(saved.at(-1),['replay','duke:one',300]);
+});
+test('failed bookmark restore resumes saving after actual listening progresses',async t=>{
+ const saved=[];const h=harness(t,undefined,{read:()=>({value:125}),save:(...args)=>saved.push(args)});
+ await settle();h.$('archive-tab').click();h.$('archive-list').querySelector('button').click();
+ Object.defineProperty(h.audio,'duration',{value:1000});Object.defineProperty(h.audio,'readyState',{value:1});Object.defineProperty(h.audio,'paused',{value:false});
+ h.audio.dispatchEvent(new h.dom.window.Event('loadedmetadata'));h.audio.currentTime=0;
+ h.audio.dispatchEvent(new h.dom.window.Event('canplay'));h.audio.currentTime=0;
+ h.audio.dispatchEvent(new h.dom.window.Event('playing'));h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.equal(saved.length,0);
+ h.audio.currentTime=3;h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.deepEqual(saved.at(-1),['replay','duke:one',3]);
+});

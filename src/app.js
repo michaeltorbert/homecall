@@ -52,8 +52,8 @@ function update(value) {
   const wasRestoring = state?.restoring != null;
   state = value;
   if (state && active && state.ingesting && !state.paused && !state.holding && state.restoring == null) {
-    if (savedDelay === null || Math.abs(savedDelay - state.delay) > 0.02) {
-      savedDelay = state.delay; if (liveKey) memory.save('live', liveKey, savedDelay);
+    if (savedDelay === null || Math.abs(savedDelay - (state.resumeDelay ?? state.delay)) > 0.02) {
+      savedDelay = state.resumeDelay ?? state.delay; if (liveKey) memory.save('live', liveKey, savedDelay);
     }
     if (wasRestoring) notice(`Restored your ${state.delay.toFixed(1)}-second delay. Check alignment with your TV.`);
   }
@@ -150,7 +150,7 @@ async function command(action, value) {
     log.acknowledge(action, ack);
     if (ack.result !== 'applied') { notice('That control is not available in the current playback state.'); return; }
     if (['nudge', 'delay', 'live', 'complete', 'cancel'].includes(action) && Number.isFinite(ack.after.delay)) {
-      savedDelay = ack.after.delay;
+      savedDelay = ack.after.resumeDelay ?? ack.after.delay;
       if (liveKey) memory.save('live', liveKey, savedDelay);
     }
     if (action === 'confirm') {
@@ -200,7 +200,7 @@ $('team').value = selected; $('team').onchange = teamChanged;
 $('connect').onclick = () => connect(); $('demo').onclick = () => connect(true);
 $('stop').onclick = () => { disconnect(); notice('Disconnected. Your saved logs are still available below.'); };
 $('pause').onclick = () => {
-  if (sourcePaused || player.context?.state !== 'running' || player.audio?.paused) return connect();
+  if ((sourcePaused && state?.paused) || player.context?.state !== 'running' || player.audio?.paused) return connect();
   if (state?.paused) return command('restore', savedDelay ?? 0);
   command('pause', true);
 };

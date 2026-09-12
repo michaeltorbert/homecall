@@ -46,3 +46,22 @@ test('pause offers saved-delay default and retained-position alternative',async 
  h.$('pause').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'restore',value:35});
  h.$('resume-position').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'pause',value:false});
 });
+
+test('the Pause action does not reconnect when audio has already recovered from a native pause',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();h.player.event('source-paused');h.player.event('source-playing');
+ h.player.update({delay:35,resumeDelay:35,available:90,paused:false,holding:false,ingesting:true,restoring:null});
+ h.$('pause').click();await settle();assert.equal(h.player.starts.length,1);assert.deepEqual(h.player.lastCommand,{type:'pause',value:true});
+});
+test('a drained live buffer preserves its reconnect delay preference',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();
+ h.player.update({delay:33,resumeDelay:35,available:90,paused:false,holding:false,ingesting:true,restoring:null});
+ h.$('connect').click();await settle();assert.equal(h.player.starts.at(-1).delay,35);
+});
+
+test('demo Resume uses its in-session delay while leaving live preferences untouched',async t=>{
+ const h=harness(t);h.$('demo').click();await settle();
+ h.player.update({delay:5,available:20,paused:false,holding:false,ingesting:true,restoring:null});
+ h.player.update({delay:8,available:25,paused:true,holding:false,ingesting:true,restoring:null});
+ h.$('pause').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'restore',value:5});
+ assert.equal(JSON.parse(h.w.localStorage.getItem('homecall.position.live.duke-leanstream')).value,35);
+});

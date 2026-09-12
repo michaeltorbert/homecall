@@ -3,8 +3,13 @@ import { filterReplays, seekReplay, stopReplay, validateCatalog } from './replay
 export function setupArchive({ stopLive, selectedTeam, memory }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
-  let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, lastSaved = null;
+  let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
   function savePosition() {
+    // A failed restore must not disable bookmarking for the rest of the listening session.
+    // Wait for actual playback progress so a transient reset to zero cannot erase the old bookmark.
+    if (restorePosition !== null && failedRestoreAt !== null && playingStarted && !audio.paused && audio.currentTime >= failedRestoreAt + 2) {
+      restorePosition = null; failedRestoreAt = null;
+    }
     if (replayKey && restorePosition === null && Number.isFinite(audio.currentTime) && audio.readyState >= 1 && audio.currentTime !== lastSaved) {
       lastSaved = audio.currentTime; memory?.save('replay', replayKey, lastSaved);
     }
@@ -61,7 +66,7 @@ export function setupArchive({ stopLive, selectedTeam, memory }) {
       detail.textContent = `${item.sport} · ${new Date(item.start).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'America/New_York' })} · ${item.kind}`;
       button.append(title, detail); button.setAttribute('aria-label', `Play ${title.textContent}, ${detail.textContent}`);
       button.onclick = () => {
-        stop(); current = item; replayKey = `${key}:${item.id}`; lastSaved = null; restoreAttempts = 0; playingStarted = false; restorePosition = memory?.read('replay', replayKey)?.value ?? null; $('replay-player').hidden = false;
+        stop(); current = item; replayKey = `${key}:${item.id}`; lastSaved = null; restoreAttempts = 0; playingStarted = false; failedRestoreAt = null; restorePosition = memory?.read('replay', replayKey)?.value ?? null; $('replay-player').hidden = false;
         $('replay-title').textContent = title.textContent; $('replay-audio').src = item.url;
         audio.playbackRate = Number($('replay-speed').value);
         message('Loading recording…');
@@ -89,9 +94,9 @@ export function setupArchive({ stopLive, selectedTeam, memory }) {
   function restoreBookmark() {
     if (!current || restorePosition === null || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
     if (restorePosition >= audio.duration - 1) { audio.currentTime = 0; restorePosition = null; return; }
-    if (restoreAttempts >= 2) { message('Your saved position could not be restored. Use the skip buttons to choose a position.'); return; }
+    if (restoreAttempts >= 2) { if (failedRestoreAt === null) failedRestoreAt = audio.currentTime; message('Your saved position could not be restored. Choose a position or keep listening to save your new progress.'); return; }
     try { ++restoreAttempts; audio.currentTime = restorePosition; }
-    catch { message('Your saved position could not be restored. Use the skip buttons to choose a position.'); }
+    catch { if (restoreAttempts >= 2) failedRestoreAt = audio.currentTime; message('Your saved position could not be restored. Choose a position or keep listening to save your new progress.'); }
   }
   function verifyBookmark() {
     if (restorePosition === null) return;
@@ -101,6 +106,11 @@ export function setupArchive({ stopLive, selectedTeam, memory }) {
       message(`Resumed at your saved position (${Math.floor(position / 60)}:${String(Math.floor(position % 60)).padStart(2, '0')}).`);
     } else restoreBookmark();
   }
+  // Native controls belong to the listener once metadata is available. A manual gesture
+  // cancels a pending automatic seek so retries cannot fight a chosen position.
+  for (const event of ['pointerdown', 'keydown']) audio.addEventListener(event, () => {
+    if (audio.readyState >= 1) { restorePosition = null; failedRestoreAt = null; }
+  });
   audio.addEventListener('loadedmetadata', restoreBookmark);
   audio.addEventListener('canplay', verifyBookmark);
   audio.addEventListener('seeked', verifyBookmark);

@@ -92,5 +92,29 @@ test('maximum saved delay survives a render block crossing the capacity boundary
 test('contiguous buffering recovery reuses available history instead of refilling',()=>{
  const e=engine(4);feed(e,[1,2,3,4,5,6,7,8]);e.command('delay',1);e.command('interrupt');feed(e,[0,0]);
  e.command('ingest',{playing:true,continuous:true});assert.equal(e.snapshot().available,2);
- assert.deepEqual(feed(e,[9,10]).samples,[5,6]);assert.equal(e.snapshot().delay,1);
+ assert.deepEqual(feed(e,[9,10]).samples,[7,8]);assert.equal(e.snapshot().delay,.5);assert.equal(e.snapshot().resumeDelay,1);
+});
+
+test('a deliberate pause during a stall survives both contiguous and discontinuous recovery',()=>{
+ for(const recovery of [true,{playing:true,continuous:true}]){
+  const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');e.command('pause',true);
+  e.command('ingest',recovery);feed(e,new Array(12).fill(2));feed(e,[3,4]);assert.equal(e.snapshot().paused,true);
+  e.command('restore',2);feed(e,[5,6]);assert.equal(e.snapshot().paused,false);assert.equal(e.snapshot().delay,2);
+ }
+});
+test('a delay adjustment during a stall replaces the pending recovery target',()=>{
+ for(const action of ['delay','nudge']){
+  const e=engine(4);feed(e,new Array(40).fill(1));e.command('delay',2);e.command('interrupt');
+  const ack=e.command(action,action==='nudge'?1:3);e.command('ingest',{playing:true,continuous:true});feed(e,[2,3]);
+  assert.equal(e.snapshot().delay,ack.after.delay);assert.equal(e.snapshot().delay,3);
+ }
+});
+
+test('continuous stalls preserve sample order and reconnect preference across repeated gaps',()=>{
+ const e=engine(4);feed(e,[1,2,3,4,5,6,7,8]);e.command('delay',1);
+ e.command('interrupt');assert.deepEqual(feed(e,[0,0]).samples,[5,6]);e.command('ingest',{playing:true,continuous:true});
+ assert.deepEqual(feed(e,[9,10]).samples,[7,8]);assert.equal(e.snapshot().resumeDelay,1);
+ e.command('interrupt');assert.deepEqual(feed(e,[0]).samples,[9]);e.command('ingest',{playing:true,continuous:true});
+ assert.deepEqual(feed(e,[11]).samples,[10]);assert.equal(e.snapshot().resumeDelay,1);
+ e.command('nudge',.25);assert.equal(e.snapshot().resumeDelay,1.25);
 });

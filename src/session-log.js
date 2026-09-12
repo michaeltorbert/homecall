@@ -6,7 +6,7 @@ const ACTIONS = ['pause', 'restore', 'nudge', 'delay', 'live', 'hold', 'complete
 const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-restored', 'context-interrupted', 'control-overflow', 'resume-failed', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
 const cleanState = (state) => {
   const value = {};
-  for (const key of ['restoring', 'delay', 'available', 'receivedSeconds', 'renderedSeconds', 'contextSeconds'])
+  for (const key of ['resumeDelay', 'restoring', 'delay', 'available', 'receivedSeconds', 'renderedSeconds', 'contextSeconds'])
     if (Number.isFinite(state?.[key])) value[key] = state[key];
   for (const key of ['paused', 'holding', 'ingesting']) if (typeof state?.[key] === 'boolean') value[key] = state[key];
   return value;

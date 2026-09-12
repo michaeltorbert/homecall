@@ -8,10 +8,12 @@ export class ManualEngine {
     this.rendered = 0;
     this.overrunReported = false;
     this.restoring = null; this.recoveryDelay = null; this.received = 0;
+    this.userPaused = false; this.gapOffset = 0;
   }
   snapshot() {
     const h = this.history;
-    return { delay: h.delay, available: h.available, paused: h.paused,
+    return { resumeDelay: Math.min(h.capacity / h.sampleRate, (this.restoring ?? this.recoveryDelay ?? h.delay) + this.gapOffset),
+      delay: h.delay, available: h.available, paused: h.paused,
       canResumePosition: this.recoveryDelay === null && this.restoring === null && h.delay < h.available,
       holding: !!this.hold, restoring: this.restoring, ingesting: this.ingesting,
       receivedSeconds: this.received / h.sampleRate, renderedSeconds: this.rendered / h.sampleRate };
@@ -21,21 +23,33 @@ export class ManualEngine {
     let result = 'applied';
     const h = this.history;
     if (type === 'restore' && Number.isFinite(value) && value >= 0 && value <= h.capacity / h.sampleRate) {
-      this.hold = null; this.restoring = value; h.paused = true;
+      this.userPaused = false; this.hold = null; this.restoring = Math.max(0, value - this.gapOffset); h.paused = true;
     } else if (this.restoring !== null && !['live', 'ingest', 'interrupt', 'invalidate', 'snapshot'].includes(type)) result = 'restoring';
     else if (this.hold && ['nudge', 'delay', 'live', 'pause', 'hold'].includes(type)) result = 'holding';
-    else if (type === 'nudge' && Number.isFinite(value)) h.setDelay(h.delay + value);
-    else if (type === 'delay' && Number.isFinite(value)) h.setDelay(value);
-    else if (type === 'live') { if (this.restoring !== null) h.paused = false; this.restoring = null; this.recoveryDelay = null; h.setDelay(0); }
-    else if (type === 'pause') h.paused = !!value;
+    else if (type === 'nudge' && Number.isFinite(value)) {
+      h.setDelay(h.delay + value);
+      if (this.recoveryDelay !== null) this.recoveryDelay = h.delay;
+    }
+    else if (type === 'delay' && Number.isFinite(value)) {
+      h.setDelay(value);
+      if (this.recoveryDelay !== null) this.recoveryDelay = h.delay;
+    }
+    else if (type === 'live') { this.gapOffset = 0; if (this.restoring !== null) h.paused = false; this.restoring = null; this.recoveryDelay = null; h.setDelay(0); }
+    else if (type === 'pause') { this.userPaused = !!value; h.paused = !!value; }
     else if (type === 'snapshot') { /* Read-only authoritative state. */ }
     else if (type === 'ingest') {
       this.ingesting = value === true || value?.playing === true;
       if (this.ingesting && this.recoveryDelay !== null) {
-        // Samples on opposite sides of a source gap are not a continuous timeline.
-        if (value?.continuous !== true) this.history = new AudioHistory(h.sampleRate, h.capacity / h.sampleRate);
-        this.restoring = this.recoveryDelay; this.recoveryDelay = null;
-        this.history.paused = true;
+        if (value?.continuous === true) {
+          // Keep the read pointer: buffered audio already heard during a stall must not repeat.
+          // Carry its drained delay into the reconnect preference, not back into playback.
+          if (this.restoring === null) this.gapOffset += Math.max(0, this.recoveryDelay - h.delay);
+        } else {
+          const target = Math.min(h.capacity / h.sampleRate, this.recoveryDelay + this.gapOffset);
+          this.history = new AudioHistory(h.sampleRate, h.capacity / h.sampleRate);
+          this.gapOffset = 0; this.restoring = target; this.history.paused = true;
+        }
+        this.recoveryDelay = null;
       }
     }
     else if (type === 'hold' && !h.paused && this.ingesting) {
@@ -57,7 +71,7 @@ export class ManualEngine {
   process(input, output) {
     const h = this.history;
     if (this.ingesting && this.restoring !== null && h.available >= this.restoring) {
-      h.setDelay(this.restoring); h.paused = false; this.restoring = null;
+      h.setDelay(this.restoring); h.paused = this.userPaused; this.restoring = null;
     }
     const renderedBefore = h.rendered, writtenBefore = h.written;
     h.process(this.ingesting ? input : [], output);
