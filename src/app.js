@@ -1,3 +1,4 @@
+import { PlaybackMemory } from './playback-memory.js';
 import { setupArchive } from './archive.js';
 import { teams } from './teams.js';
 import { Player } from './player.js';
@@ -6,6 +7,8 @@ import { demoURL } from './demo.js';
 const $ = id => document.getElementById(id);
 let storage;
 try { storage = localStorage; } catch { /* Private browsing may deny access. */ }
+const memory = new PlaybackMemory(storage, text => { $('storage-warning').textContent = text; });
+let liveKey = null, savedDelay = null, sourcePaused = false;
 let selected = 'duke';
 try { if (teams[storage?.getItem('mystream.team')]) selected = storage.getItem('mystream.team'); } catch {}
 let state = null, connecting = false, active = false, scrubbing = false, generation = 0, demo = null, pending = 0, specialPending = false;
@@ -16,6 +19,7 @@ const log = new SessionLog({ storage, build, onWarning: text => { $('storage-war
 const notice = text => { $('notice').textContent = text; };
 const player = new Player(update, event => {
   if (!active) return;
+  if (event === 'source-paused') sourcePaused = true;
   if (event === 'source-playing') {
     sourceStatus = 'Receiving audio'; log.add(event, {}, state);
   } else {
@@ -23,9 +27,10 @@ const player = new Player(update, event => {
     const messages = {
       'source-waiting': 'The source is buffering. Check alignment when it returns.',
       'source-stalled': 'The source stopped delivering data. Check alignment when it returns.',
-      'source-paused': 'Your phone paused the source. Press Resume audio, then check alignment.',
+      'source-paused': 'Your phone paused the source. Resume audio restores your saved delay; use the TV-paused option only if the picture stopped too.',
       'source-ended': 'The source ended. Reconnect to start a fresh audio buffer.',
       'source-error': 'This stream could not play. Reconnect or try the official player; availability can depend on broadcast rights or location.',
+      'context-restored': 'Phone audio returned. Restoring playback; check alignment.',
       'context-interrupted': 'Phone audio was interrupted. Press Resume audio, then check alignment.',
       'engine-error': 'The audio engine stopped. Reconnect to start a fresh buffer.',
       'control-overflow': 'Audio disconnected after too many pending source events. Press Play to reconnect.',
@@ -44,27 +49,38 @@ function update(value) {
     if (demo) URL.revokeObjectURL(demo); demo = null;
     refreshSessions();
   }
-  state = value; render();
+  const wasRestoring = state?.restoring != null;
+  state = value;
+  if (state && active && state.ingesting && !state.paused && !state.holding && state.restoring == null) {
+    if (savedDelay === null || Math.abs(savedDelay - state.delay) > 0.02) {
+      savedDelay = state.delay; if (liveKey) memory.save('live', liveKey, savedDelay);
+    }
+    if (wasRestoring) notice(`Restored your ${state.delay.toFixed(1)}-second delay. Check alignment with your TV.`);
+  }
+  render();
 }
 function render() {
   const ready = active && !!state && !connecting;
+  const restoring = state?.restoring != null;
   const holding = !!state?.holding;
-  const positionReady = ready && player.context?.state === 'running';
-  $('status').textContent = connecting ? 'Connecting…' : sourceStatus;
+  const positionReady = ready && !restoring && player.context?.state === 'running';
+  $('status').textContent = restoring ? `Restoring ${state.restoring.toFixed(1)}-second delay · ${Math.max(0, state.restoring - state.available).toFixed(0)} s of audio still needed` : connecting ? 'Connecting…' : sourceStatus;
   $('connect').textContent = active ? 'Reconnect audio' : `Play ${teams[selected].name} audio`;
   $('connect').disabled = connecting;
   $('stop').disabled = !active && !connecting;
-  $('pause').disabled = !ready || holding || specialPending;
+  $('pause').disabled = !ready || (restoring && player.context?.state === 'running' && !player.audio?.paused) || holding || specialPending;
   $('pause').textContent = state?.paused || player.audio?.paused || player.context?.state !== 'running' ? 'Resume audio' : 'Pause audio';
   $('hold').disabled = !positionReady || specialPending || (!holding && (state.paused || !state.ingesting));
   $('hold').textContent = holding ? 'I see it on TV · resume audio' : 'I heard the play · hold audio';
+  $('resume-position').hidden = !ready || state?.canResumePosition === false || !state?.paused || restoring || holding || state.delay >= state.available - 0.01;
+  $('resume-position').disabled = specialPending;
   $('cancel').hidden = !holding;
   $('cancel').disabled = !positionReady || specialPending;
   $('sync-help').textContent = holding ? 'Audio is held while the buffer keeps filling. Tap when that same play appears on TV.' : 'When the call comes before the picture, tap as you hear a distinct play. Tap again when you see it on TV.';
-  $('confirm').disabled = !ready || holding || state.paused || !state.ingesting || pending > 0 || player.context?.state !== 'running';
+  $('confirm').disabled = !ready || restoring || holding || state.paused || !state.ingesting || pending > 0 || player.context?.state !== 'running';
   $('alignment').textContent = log.confirmed && !needsCheck ? 'You marked it aligned' : 'Check alignment';
   $('scrub').disabled = !positionReady || holding || specialPending;
-  $('live').disabled = !positionReady || holding || specialPending;
+  $('live').disabled = !ready || player.context?.state !== 'running' || holding || specialPending;
   document.querySelectorAll('[data-nudge]').forEach(button => { button.disabled = !positionReady || holding || specialPending; });
   $('delay').textContent = (state?.delay || 0).toFixed(2);
   $('buffer').textContent = state ? `${state.available.toFixed(1)} s of history available · ${state.paused ? 'audio paused' : 'up to 180 s'}` : 'History fills as you listen · up to 3 minutes';
@@ -85,7 +101,7 @@ function teamChanged() {
   notice(`Ready for ${team.name}. Keep this page open while listening.`); render();
 }
 function disconnect() {
-  ++generation; log.end(state); player.stop();
+  ++generation; sourcePaused = false; liveKey = null; savedDelay = null; log.end(state); player.stop();
   if (demo) URL.revokeObjectURL(demo); demo = null;
   state = null; active = connecting = false; pending = 0; specialPending = false;
   needsCheck = true; sourceStatus = 'Disconnected'; refreshSessions(); render();
@@ -94,17 +110,20 @@ async function connect(useDemo = false) {
   disconnect(); const mine = generation;
   active = connecting = true;
   const team = teams[selected];
+  liveKey = useDemo ? null : team.sourceId;
+  savedDelay = liveKey ? memory.read('live', liveKey)?.value ?? null : null;
+  const restoreDelay = savedDelay ?? 0;
   log.start(selected, useDemo ? 'test-tone' : team.sourceId, useDemo ? 'demo' : 'live', $('provider').value, $('output').value);
   sourceStatus = 'Connecting'; notice('Connecting to the audio source…');
   $('station').textContent = useDemo ? 'Timing demo · repeating tones' : team.station;
   refreshSessions(log.session.id); render();
   try {
     const url = useDemo ? (demo = demoURL()) : team.url;
-    const started = player.start(url);
+    const started = player.start(url, restoreDelay);
     if (useDemo && player.audio) player.audio.loop = true;
     await started;
     if (mine !== generation) return;
-    connecting = false; notice(useDemo ? 'Demo only: a tone each second, higher every fifth. Try pause, delay and the two-tap match.' : 'Listen for a distinct play to match. If audio already trails TV, pause the TV.');
+    connecting = false; notice(restoreDelay > 0 && !useDemo ? `Restoring your saved ${restoreDelay.toFixed(1)}-second delay. Audio will resume when enough history is available; check alignment. Choose Jump to incoming audio to skip the wait.` : useDemo ? 'Demo only: a tone each second, higher every fifth. Try pause, delay and the two-tap match.' : 'Listen for a distinct play to match. If audio already trails TV, pause the TV.');
   } catch {
     if (mine !== generation) return;
     log.boundary('source-error', state); log.end(state);
@@ -117,7 +136,7 @@ async function connect(useDemo = false) {
 async function command(action, value) {
   const mine = generation;
   if (!active || !state) return;
-  const special = ['pause', 'hold', 'complete', 'cancel', 'confirm'].includes(action);
+  const special = ['pause', 'hold', 'complete', 'cancel', 'confirm', 'restore'].includes(action);
   if (specialPending || (special && pending)) return;
   pending++; if (special) specialPending = true;
   if (action !== 'confirm') needsCheck = true;
@@ -130,6 +149,10 @@ async function command(action, value) {
     if (mine !== generation) return;
     log.acknowledge(action, ack);
     if (ack.result !== 'applied') { notice('That control is not available in the current playback state.'); return; }
+    if (['nudge', 'delay', 'live', 'complete', 'cancel'].includes(action) && Number.isFinite(ack.after.delay)) {
+      savedDelay = ack.after.delay;
+      if (liveKey) memory.save('live', liveKey, savedDelay);
+    }
     if (action === 'confirm') {
       needsCheck = !log.confirm({ ...ack.after, contextSeconds: ack.contextSeconds }, $('reason').value);
       if (!needsCheck) notice('Alignment marked. Check again after a break or interruption.');
@@ -176,7 +199,12 @@ function preview() {
 $('team').value = selected; $('team').onchange = teamChanged;
 $('connect').onclick = () => connect(); $('demo').onclick = () => connect(true);
 $('stop').onclick = () => { disconnect(); notice('Disconnected. Your saved logs are still available below.'); };
-$('pause').onclick = () => command('pause', player.context?.state !== 'running' || player.audio?.paused ? false : !state.paused);
+$('pause').onclick = () => {
+  if (sourcePaused || player.context?.state !== 'running' || player.audio?.paused) return connect();
+  if (state?.paused) return command('restore', savedDelay ?? 0);
+  command('pause', true);
+};
+$('resume-position').onclick = () => { sourcePaused = false; command('pause', false); };
 $('hold').onclick = () => command(state?.holding ? 'complete' : 'hold');
 $('cancel').onclick = () => command('cancel'); $('confirm').onclick = () => command('confirm');
 $('live').onclick = () => command('live');
@@ -226,4 +254,4 @@ window.addEventListener('pagehide', () => { log.boundary('hidden', state); });
 setInterval(() => { if (active && state) log.heartbeat(state, !document.hidden && player.context?.state === 'running'); }, 30000);
 teamChanged(); refreshSessions(); render();
 
-setupArchive({ stopLive: disconnect, selectedTeam: () => selected });
+setupArchive({ stopLive: disconnect, selectedTeam: () => selected, memory });

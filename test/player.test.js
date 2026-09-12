@@ -84,7 +84,7 @@ test('hung resume releases the operation by closing its source after a bounded d
 test('safe internal controls survive suspension without timeout teardown and accept later acknowledgments',async()=>{
  const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});await connect(h);
  const c=h.contexts[0],a=h.audios[0],n=h.nodes[0];c.state='suspended';c.onstatechange();a.paused=true;a.onpause();
- assert.deepEqual(n.messages.slice(1).map(m=>m.type),['invalidate','interrupt']);
+ assert.deepEqual(n.messages.slice(1).map(m=>m.type),['interrupt','interrupt']);
  assert.equal(n.messages.at(-1).value,true);assert.equal(timers.filter(t=>!t.cleared && t.ms===2500).length,0);
  assert.equal(c.closed,undefined);assert.equal(h.player.pending.size,2);
  n.ack(1);n.ack(2);await tick();assert.equal(h.player.pending.size,0);assert.equal(c.closed,undefined);h.player.stop();
@@ -99,4 +99,23 @@ test('initial ingest acknowledgment remains covered by the startup deadline',asy
  const started=h.player.start('https://fixture/stream'),rejection=assert.rejects(started,/source-timeout/);
  h.audios[0].played.resolve();h.contexts[0].module.resolve();await tick();assert.equal(h.nodes[0].messages.length,1);
  timers.find(t=>t.ms===20000).fn();await rejection;assert.equal(h.contexts[0].closed,true);
+});
+
+test('automatic context recovery establishes a source-gap boundary before ingestion resumes',async()=>{
+ const h=harness();await connect(h);const c=h.contexts[0],n=h.nodes[0];
+ c.state='suspended';c.onstatechange();n.ack(1);
+ c.state='running';c.onstatechange();assert.equal(n.messages[2].type,'ingest');assert.equal(n.messages[2].value,true);n.ack(2);
+ assert.equal(h.events.at(-1),'context-restored');h.player.stop();
+});
+test('saved delay restore is acknowledged before startup admits incoming audio',async()=>{
+ const h=harness();const started=h.player.start('https://fixture/stream',35);
+ h.audios[0].onplaying();h.audios[0].played.resolve();h.contexts[0].module.resolve();await tick();
+ const n=h.nodes[0];assert.equal(n.messages[0].type,'restore');assert.equal(n.messages[0].value,35);
+ n.ack(0);await tick();assert.equal(n.messages[1].type,'ingest');n.ack(1);await started;h.player.stop();
+});
+
+test('media position continuity distinguishes a buffering pause from skipped source audio',async()=>{
+ const h=harness();await connect(h);const a=h.audios[0],n=h.nodes[0];a.currentTime=10;a.onwaiting();n.ack(1);
+ a.onplaying();assert.deepEqual(JSON.parse(JSON.stringify(n.messages[2].value)),{playing:true,continuous:true});n.ack(2);
+ a.onwaiting();n.ack(3);a.currentTime=15;a.onplaying();assert.equal(n.messages[4].value,true);n.ack(4);h.player.stop();
 });

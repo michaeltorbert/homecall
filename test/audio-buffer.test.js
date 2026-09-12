@@ -25,7 +25,8 @@ test('buffer overrun remains bounded and signals invalidated timing', () => {
   step(h, [1,2,3,4,5,6]);
   assert.equal(h.delay, 2); assert.equal(h.overrun, true);
   h.paused = false;
-  assert.deepEqual(step(h, [7,8]), [4,5]);
+  // The oldest retained sample is read before the full ring overwrites it.
+  assert.deepEqual(step(h, [7,8]), [3,4]);
 });
 test('missing input drains history then emits silence without inventing samples', () => {
   const h = new AudioHistory(4,3); h.paused = true; step(h,[1,2]); h.paused=false;

@@ -4,7 +4,7 @@ export class Player {
     this.onState = onState; this.onEvent = onEvent;
     this.epoch = 0; this.sequence = 0; this.pending = new Map(); this.state = null;
   }
-  async start(url) {
+  async start(url, delay = 0) {
     this.stop();
     const epoch = this.epoch;
     const Context = window.AudioContext || window.webkitAudioContext;
@@ -13,11 +13,23 @@ export class Player {
     const audio = this.audio = new Audio();
     audio.crossOrigin = 'anonymous'; audio.preload = 'none'; audio.playsInline = true;
     const valid = () => epoch === this.epoch;
+    let gapPosition = null;
+    const markGap = () => { if (gapPosition === null) gapPosition = Number.isFinite(audio.currentTime) ? audio.currentTime : NaN; };
+    const ingestion = () => {
+      const continuous = Number.isFinite(gapPosition) && Number.isFinite(audio.currentTime) && Math.abs(audio.currentTime - gapPosition) < 0.1;
+      gapPosition = null;
+      return continuous ? { playing: true, continuous: true } : true;
+    };
     context.onstatechange = () => {
       if (!valid()) return;
       if (context.state !== 'running') {
-        if (this.node) this.command('invalidate').catch(() => {});
+        markGap(); this.contextInterrupted = true;
+        if (this.node) this.command('interrupt').catch(() => {});
         this.onEvent('context-interrupted');
+      } else if (this.contextInterrupted) {
+        this.contextInterrupted = false;
+        if (this.node) this.command('ingest', this.mediaPlaying ? ingestion() : false).catch(() => {});
+        this.onEvent('context-restored');
       }
     };
     // Resume and media.play originate in this click; do not wait for module download first.
@@ -26,12 +38,12 @@ export class Player {
     audio.onplaying = () => {
       if (!valid()) return;
       this.mediaPlaying = true;
-      if (this.node) this.command('ingest', true).catch(() => {});
+      if (this.node) this.command('ingest', ingestion()).catch(() => {});
       this.onEvent('source-playing');
     };
     const interrupted = (kind) => {
       if (!valid()) return;
-      this.mediaPlaying = false;
+      markGap(); this.mediaPlaying = false;
       if (this.node) this.command('interrupt', kind === 'source-paused').catch(() => {});
       this.onEvent(kind);
     };
@@ -65,7 +77,11 @@ export class Player {
         }
       };
       node.onprocessorerror = () => interrupted('engine-error');
-      source.connect(node); node.connect(gain); gain.connect(context.destination);
+      node.connect(gain); gain.connect(context.destination);
+      // Run the output graph so the restore can be acknowledged before admitting input.
+      if (delay > 0) await Promise.race([this.command('restore', delay), deadline]);
+      if (!valid()) return;
+      source.connect(node);
       await settled;
       if (valid()) await Promise.race([this.command('ingest', !!this.mediaPlaying), deadline]);
     } catch (error) { if (valid()) this.stop(); throw error; }
@@ -116,6 +132,6 @@ export class Player {
     if (this.context) { this.context.onstatechange = null; this.context.close().catch(() => {}); }
     if (this.node) this.node.port.onmessage = null;
     this.audio = this.context = this.node = this.source = this.gain = null;
-    this.mediaPlaying = false; this.state = null;
+    this.mediaPlaying = false; this.contextInterrupted = false; this.state = null;
   }
 }

@@ -1,0 +1,48 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
+import { PlaybackMemory } from '../src/playback-memory.js';
+import { SessionLog } from '../src/session-log.js';
+import { teams } from '../src/teams.js';
+const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
+const settle=()=>new Promise(r=>setImmediate(r));
+function harness(t) {
+ const dom=new JSDOM(html,{url:'https://example.test/',runScripts:'outside-only'}),w=dom.window;
+ t.after(()=>w.close());let player;
+ class FakePlayer {
+  constructor(update,event){this.update=update;this.event=event;this.sequence=0;this.epoch=0;player=this;this.starts=[];}
+  start(url,delay){this.starts.push({url,delay});this.context={state:'running'};this.audio={paused:false};return Promise.resolve();}
+  stop(){this.context=null;this.audio=null;}
+  command(type,value){this.lastCommand={type,value};return Promise.resolve({result:'applied',before:{delay:35},after:{delay:35},contextSeconds:1});}
+  resumeContext(){return Promise.resolve();}
+ }
+ Object.assign(w,{PlaybackMemory,SessionLog,teams,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
+ w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
+ w.URL.revokeObjectURL=()=>{};w.eval(source);return {w,player,$:id=>w.document.getElementById(id)};
+}
+test('reconnect and reload restore the saved source delay without replacing it with refill state',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();assert.equal(h.player.starts[0].delay,35);
+ h.player.update({delay:0,available:0,paused:true,holding:false,ingesting:true,restoring:35});
+ h.player.update({delay:10,available:10,paused:true,holding:false,ingesting:true,restoring:35});
+ assert.equal(JSON.parse(h.w.localStorage.getItem('homecall.position.live.duke-leanstream')).value,35);
+ assert.match(h.$('status').textContent,/25 s of audio/);
+ h.$('connect').click();await settle();assert.equal(h.player.starts[1].delay,35);
+ h.player.update({delay:35,available:40,paused:false,holding:false,ingesting:true,restoring:null});
+ h.player.update({delay:37,available:45,paused:false,holding:false,ingesting:true,restoring:null});
+ h.$('connect').click();await settle();assert.equal(h.player.starts[2].delay,37);
+});
+test('source changes and demo cannot inherit or overwrite another live source delay',async t=>{
+ const h=harness(t);h.$('demo').click();await settle();assert.equal(h.player.starts[0].delay,0);
+ h.player.update({delay:5,available:10,paused:false,holding:false,ingesting:true,restoring:null});
+ assert.equal(JSON.parse(h.w.localStorage.getItem('homecall.position.live.duke-leanstream')).value,35);
+ h.$('team').value='miami';h.$('team').onchange();h.$('connect').click();await settle();assert.equal(h.player.starts[1].delay,0);
+});
+test('pause offers saved-delay default and retained-position alternative',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();
+ h.player.update({delay:55,available:90,paused:true,holding:false,ingesting:true,restoring:null});
+ assert.equal(h.$('resume-position').hidden,false);
+ h.$('pause').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'restore',value:35});
+ h.$('resume-position').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'pause',value:false});
+});
