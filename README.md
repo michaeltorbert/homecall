@@ -105,8 +105,9 @@ decoded JSON limit. Browser metadata and playlist requests retain their
 
 **Deployment:** the public catalog lacks CORS headers. The repository now includes
 an optional Cloudflare Worker metadata gateway for the static Pages frontend;
-it has been tested locally but has not been deployed or proven within the Free
-CPU limit. See the setup and release gates below. Existing direct radio feeds
+it is deployed at `https://homecall-metadata.homecall.workers.dev`. Homestream
+catalog routes work; the Worker timing routes remain denied by ESPN. Free
+entitlement and successful-path timing CPU remain unverified. See the setup and release gates below. Existing direct radio feeds
 and Archive remain available on static hosting. A catalog error does not
 silently fall back to a dated or unverified stream. This change does not add
 Georgia Tech recordings to Archive or claim automatic TV synchronization.
@@ -122,7 +123,8 @@ manual-delay controls remain separate and unchanged.
 Select a school/game, wait for feed verification, then Play. Sync shows the
 playing audio's real-world timestamp, local current time, estimated game-clock
 anchor, and earliest/latest anchors inside the current HLS window. Enter a
-quarter and TV clock to seek to the nearest available recorded play. Identical
+quarter and TV clock to find the nearest available recorded play. Every result
+requires confirming a play description before audio moves. Identical
 clocks can refer to multiple plays; choose the matching description. Outside
 window requests do not move playback. Bounds are not a promise that every
 intermediate clock has a unique mapping. Back/ahead buttons allow manual
@@ -133,9 +135,11 @@ The fixed-host `/api/sync/teams`, `/api/sync/schedule/<team-id>/<year>` and
 play data. Matching requires both school names, a nearby game date and exactly
 one event. Successful play polling runs every 15 seconds. After failures, retry
 waits increase from 15 to 30, 60 and 120 seconds, resetting on success. The
-45-second seek budget includes the server-reported age, the browser request
-duration and local elapsed time. All clock seek paths, including saved play
-choices, share that budget. Missing or invalid timing age, backward or uncertain
+45-second seek budget for **Homecall service** includes the server-reported age,
+the browser request duration and local elapsed time. All service-source seek
+paths, including saved play choices, share that budget. **ESPN recorded plays**
+is a separate user-selected historical mode described below; it preserves
+unknown freshness and requires explicit confirmation for every seek. Missing or invalid timing age, backward or uncertain
 local clocks, and hidden-tab transitions invalidate timing. Returning to the
 visible tab requires a fresh lookup; manual audio adjustment remains available. Out-of-order provider timestamps remain explicitly
 unverified, never interpolated into a continuously ticking game clock.
@@ -161,7 +165,7 @@ all non-success responses, including every redirect. Invalid metadata returns
 `caches.default` is optional. Normalized team lists may be cached for 3,600 seconds,
 games for 15 seconds, schedules for 300 seconds and plays for 10 seconds. Cache
 errors act as misses; explicit check times prevent expired entries from extending
-freshness. Every plays response includes integer `ageMs` recalculated at delivery
+freshness. Every plays response includes `ageMs` (a nonnegative age or `null` when unknown) recalculated at delivery
 and unchanged `checkedAt`; the other four responses remain arrays. Browser
 responses use `Cache-Control: no-store`; CORS is attached after cache lookup.
 The only production browser Origin allowed is `https://michaeltorbert.github.io`
@@ -202,8 +206,8 @@ fixture upstreams, including Cache API hits, per-delivery timing age, CORS,
 redirect rejection, body limits and cancellation. A September 12 real-provider
 probe through local workerd returned 200 for Homestream teams/games, but ESPN
 returned 403 HTML access-denied responses for all three route families; the
-gateway correctly returned unavailable (502). This remains a release blocker
-for hosted Sync until the approved deployment can access those routes. No
+gateway correctly returned unavailable (502). This blocks the Homecall-service timing source. The separate browser recorded-play
+source requires permitted browser acceptance before hosted Sync is released. No
 access-denial bypass or header impersonation was attempted. These checks do not prove
 platform CPU, deployed cache effectiveness, browser media CORS or audible output.
 Generated bundles, local runtime state and generated types are ignored. Wrangler
@@ -252,13 +256,39 @@ verified Duke, Georgia Tech, Virginia and Auburn ID associations rather than a
 large live ESPN team-list request. Games and stream URLs are still discovered
 from the public Homestream catalog.
 
-The Sync tab has a session-only **Game timing source** choice. **Homecall
-service** uses the gateway; **Browser · manual sync only** explicitly requests
-ESPN's public schedule/play routes from the browser. It does not switch
-silently on errors. The browser alternative preserves unknown freshness and
-cannot enable game-clock seeking; it can display recorded anchors when CORS
-and stream timestamps are available. Manual playback and delay controls remain
-usable. Retry timing does not restart audio.
+The Sync tab asks for a session-only **Game timing source** choice. **ESPN
+recorded plays · confirm before seeking** requests only ESPN's public CORS-enabled
+schedule/summary routes directly from the browser, with no credentials, redirect
+following or proxy. **Homecall service** retains its bounded-age seek policy. No
+source is selected implicitly and no failure silently switches sources. Catalog
+discovery and the verified four-school ID mapping still use the Worker.
+
+Recorded-play mode is historical navigation: it maps a reported play timestamp
+into an unambiguous, currently seekable HLS fragment. It does not estimate the
+current game clock. Unknown HTTP age remains unknown, since ESPN does not expose
+Date/Age to browser code. Neither HTTP age nor the play's wallclock establishes
+reporting delay or precise stadium-to-audio alignment. A 45-second cache-age
+limit is not needed to let the user inspect and deliberately select a historical
+record; this mode therefore does not borrow or weaken the service-source policy.
+Latest plays and corrections may be missing, and the UI says so.
+
+Choose **ESPN recorded plays**, enter the TV quarter/clock, and press **Find
+recorded play**. Nothing moves until you select a described play, including an
+exact unique match. Compare the audio with that play on TV and use back/ahead
+buttons to fine-tune. The result explicitly says this does not confirm alignment.
+Repeated clocks show all matching descriptions, nearest matches show the distance,
+and out-of-window requests never move audio. Poll failures pause recorded-play
+seeking; valid recovery reenables it. New snapshots, source/feed/game changes,
+hiding the tab, calibration edits and stopping/restarting playback invalidate old
+choices. Seek positions are recalculated against the current HLS window at click
+time. Native-HLS browsers without exposed timestamps retain manual controls.
+
+September 13 Node HTTP probes returned 200 with `Access-Control-Allow-Origin: *`
+for all four schedules and a Georgia Tech summary (168 reported plays). These
+probes verify public source responses only. They are not real-browser CORS,
+audible playback, timestamp accuracy or TV-alignment tests. No alternate provider
+or hosting migration is needed for this bounded candidate; a contracted provider
+remains a future option if actual browser acceptance or timestamp usefulness fails.
 
 Timing schema 2 binds both teams, season and event identity. Upstream HTTP age,
 request duration and cache residence are counted conservatively; absent or

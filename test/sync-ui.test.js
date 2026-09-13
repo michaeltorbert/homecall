@@ -8,7 +8,7 @@ import * as mapping from '../src/sync-mapping.js';
 const source=fs.readFileSync(new URL('../src/sync.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export function','function');
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const tick=()=>new Promise(r=>setImmediate(r));
-function harness(t,{delayTeams=false,duplicate=false,ageMs=0,requestMs=0,delayPlays=false,wrongEvent=false,failSchedule=false,gateway=''}={}){
+function harness(t,{delayTeams=false,duplicate=false,ageMs=0,requestMs=0,delayPlays=false,wrongEvent=false,failSchedule=false,gateway='',timingSource='gateway'}={}){
  const dom=new JSDOM(html,{url:'http://example.test/',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;t.after(()=>w.close());
  w.__GATEWAY_ORIGIN__=gateway;const requests=[],browserRequests=[];
  const base=Date.now(),school='Duke',game={id:'one',opponent:'Illinois',start:base,url:'https://example.cloudfront.net/live.m3u8'};
@@ -28,11 +28,11 @@ function harness(t,{delayTeams=false,duplicate=false,ageMs=0,requestMs=0,delayPl
   return delayPlays?new Promise(resolve=>resolvePlays=()=>resolve(value)):value;
  };
  Object.assign(w,{...mapping,metadataURL,createTimingFreshness:()=>createTimingFreshness({clock:()=>({wall:localNow,mono:localNow})}),nextPollDelay,browserTiming:async path=>{browserRequests.push(path);return readJSON(new URL('/api/'+path,'https://browser-provider.test'));},SyncPlayer:FakePlayer,readJSON,setupHomestream:callbacks=>(catalog={ready:null,setEnabled(v){this.ready=v?game:null;if(v){callbacks.onChange();callbacks.onReady()}},async refresh(){callbacks.onChange();callbacks.onReady()}})});
- w.eval(source+';window.setup=setupSync;');const ui=w.setup();return{ui,w,player,game,timers,requests,browserRequests,plays,recoverSchedule:()=>failSchedule=false,advance:ms=>localNow+=ms,fail:()=>failPlays=true,recover:()=>failPlays=false,resolvePlays:()=>resolvePlays(),get catalog(){return catalog},resolveTeams:x=>resolveTeams(x),$:id=>w.document.getElementById('sync-'+id)};
+ w.eval(source+';window.setup=setupSync;');const ui=w.setup();w.document.getElementById('sync-timing-source').value=timingSource;return{ui,w,player,game,timers,requests,browserRequests,plays,recoverSchedule:()=>failSchedule=false,advance:ms=>localNow+=ms,fail:()=>failPlays=true,recover:()=>failPlays=false,resolvePlays:()=>resolvePlays(),get catalog(){return catalog},resolveTeams:x=>resolveTeams(x),$:id=>w.document.getElementById('sync-'+id)};
 }
 test('Sync exposes all catalog schools, applies bounded clock and leaves outside requests unchanged',async t=>{
  const h=harness(t);h.ui.activate();await tick();assert.equal(h.$('team').options.length,4);h.$('play').click();await tick();
- assert.equal(h.$('apply').disabled,false);h.$('quarter').value='1';h.$('clock').value='10:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));assert.equal(h.player.seeks.at(-1),10);
+ assert.equal(h.$('apply').disabled,false);h.$('quarter').value='1';h.$('clock').value='10:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));assert.equal(h.player.seeks.length,0);h.$('matches').children[0].click();assert.equal(h.player.seeks.at(-1),10);
  h.$('clock').value='12:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));assert.equal(h.player.seeks.length,1);assert.match(h.$('result').textContent,/outside/);
  h.ui.deactivate();assert.equal(h.player.active,false);
 });
@@ -47,7 +47,7 @@ test('leaving Sync cancels pending timing lookup and late results cannot revive 
 test('server cache age plus request duration disables every clock seek path while manual controls remain usable',async t=>{
  const h=harness(t,{ageMs:44000,requestMs:1000});h.ui.activate();await tick();h.$('play').click();
  assert.equal(h.$('apply').disabled,true);assert.equal(h.$('incoming').disabled,false);
- h.$('clock').value='10:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));assert.equal(h.player.seeks.length,0);assert.match(h.$('result').textContent,/fresh/);
+ h.$('clock').value='10:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));assert.equal(h.player.seeks.length,0);assert.match(h.$('result').textContent,/recent snapshot/);
 });
 test('saved play choices expire at the same freshness boundary as render and form submission',async t=>{
  const h=harness(t,{duplicate:true});h.ui.activate();await tick();h.$('play').click();h.$('clock').value='10:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));
@@ -83,7 +83,7 @@ test('nearest clock shows distance and requires confirmation before moving audio
 test('unknown upstream age displays anchors but only manual audio remains enabled',async t=>{
  const h=harness(t,{ageMs:null});h.ui.activate();await tick();h.$('play').click();
  assert.equal(h.$('apply').disabled,true);assert.equal(h.$('incoming').disabled,false);assert.match(h.$('range').textContent,/freshness unknown/);
- assert.match(h.$('mapping-note').textContent,/freshness is unknown/);
+ assert.match(h.$('mapping-note').textContent,/[Ff]reshness is unknown/);
 });
 test('wrong event envelope cannot enable game-clock seeking',async t=>{
  const h=harness(t,{wrongEvent:true});h.ui.activate();await tick();h.$('play').click();assert.equal(h.$('apply').disabled,true);assert.equal(h.$('incoming').disabled,false);
@@ -101,9 +101,31 @@ test('same event with a different feed clears calibration',async t=>{
  const h=harness(t);h.ui.activate();await tick();h.$('offset').value='5';h.game.url='https://example.cloudfront.net/other.m3u8';await h.catalog.refresh();await tick();assert.equal(h.$('offset').value,'0');
 });
 
-test('browser timing is an explicit manual-only choice and transport changes keep audio playing',async t=>{
+test('browser recorded-play mode is explicit and transport changes keep audio playing',async t=>{
  const h=harness(t);h.ui.activate();await tick();h.$('play').click();assert.equal(h.browserRequests.length,0);assert.equal(h.$('apply').disabled,false);
  h.$('offset').value='3';h.$('timing-source').value='browser';h.$('timing-source').dispatchEvent(new h.w.Event('change'));assert.equal(h.$('apply').disabled,true);await tick();
- assert.equal(h.player.active,true);assert.equal(h.$('offset').value,'0');assert.equal(h.$('apply').disabled,true);assert.equal(h.browserRequests.length,2);assert.match(h.$('mapping-note').textContent,/freshness is unknown/);
+ assert.equal(h.player.active,true);assert.equal(h.$('offset').value,'0');assert.equal(h.$('apply').disabled,false);assert.equal(h.browserRequests.length,2);assert.match(h.$('mapping-note').textContent,/freshness unknown/);
  h.$('timing-source').value='gateway';h.$('timing-source').dispatchEvent(new h.w.Event('change'));await tick();assert.equal(h.$('apply').disabled,false);assert.equal(h.player.active,true);
+});
+
+
+test('no timing source is chosen implicitly; manual playback remains available',async t=>{
+ const h=harness(t,{timingSource:''});h.ui.activate();await tick();h.$('play').click();
+ assert.equal(h.requests.length,1);assert.equal(h.browserRequests.length,0);assert.equal(h.$('apply').disabled,true);assert.equal(h.$('incoming').disabled,false);
+ assert.match(h.$('mapping-note').textContent,/Choose ESPN recorded plays/);
+});
+test('historical mode keeps unknown age and requires a described-play confirmation even for an exact single match',async t=>{
+ const h=harness(t,{timingSource:'browser',ageMs:null});h.ui.activate();await tick();h.$('play').click();h.$('clock').value='10:00';
+ h.advance(45000);h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));
+ assert.equal(h.player.seeks.length,0);assert.equal(h.$('matches').children.length,1);assert.match(h.$('matches').textContent,/First play/);assert.match(h.$('range').textContent,/freshness unknown/);
+ h.$('matches').children[0].click();assert.equal(h.player.seeks.at(-1),10);assert.match(h.$('result').textContent,/does not confirm alignment/);
+});
+test('historical seek choices fail closed on poll failure, correction, stop, hidden tab and moving audio window',async t=>{
+ const h=harness(t,{timingSource:'browser',ageMs:null});h.ui.activate();await tick();h.$('play').click();h.$('clock').value='10:00';
+ const choice=()=>{h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));return h.$('matches').children[0];};
+ let b=choice();h.fail();await h.timers.at(-1).callback();b.click();assert.equal(h.player.seeks.length,0);assert.equal(h.$('apply').disabled,true);assert.equal(h.$('incoming').disabled,false);
+ h.recover();await h.timers.at(-1).callback();b=choice();h.plays[0].utc+=1000;await h.timers.at(-1).callback();b.click();assert.equal(h.player.seeks.length,0);
+ b=choice();const original=h.player.timing;h.player.timing=()=>({...original(),ranges:[[25,30]]});b.click();assert.equal(h.player.seeks.length,0);h.player.timing=original;
+ b=choice();h.$('stop').click();b.click();assert.equal(h.player.seeks.length,0);h.$('play').click();b.click();assert.equal(h.player.seeks.length,0);
+ b=choice();Object.defineProperty(h.w.document,'visibilityState',{value:'hidden',configurable:true});h.w.document.dispatchEvent(new h.w.Event('visibilitychange'));b.click();assert.equal(h.player.seeks.length,0);
 });

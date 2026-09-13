@@ -10,6 +10,6 @@ export async function browserTiming(path, { signal, fetcher = fetch, now = Date.
   if (!plays) throw Error('timing-route-unavailable');
   const data = await readBackendJSON(`${ESPN}/summary?event=${plays[1]}`, {signal, fetcher});
   // Even a successful CORS read does not establish upstream age. This source
-  // displays anchors but cannot enable estimated clock seeking in this release.
+  // supports explicit, user-confirmed recorded-play seeking, never a live clock.
   return normalizePlays(data, now(), {eventId:plays[1],ageMs:null});
 }
