@@ -6,6 +6,7 @@
 <div class="team-row"><label for="team">Your team</label><select id="team"><option value="duke">Duke · Blue Devils</option><option value="miami">Miami · Hurricanes</option><option value="vt">Virginia Tech · Hokies</option><option value="gt">Georgia Tech · Yellow Jackets</option></select></div>
 <section id="game-panel" hidden><label for="game">Football game</label><select id="game" disabled></select><p id="game-note" role="status"></p><button id="game-refresh">Refresh games</button></section>
 <div class="station-row"><div><p class="eyebrow">INTERNET AUDIO</p><h1 id="station">Duke Sports Network</h1></div><span id="status" role="status">Disconnected</span></div>
+<div id="feed-picker" class="feed-picker" hidden><label for="feed">Audio feed</label><select id="feed" aria-describedby="feed-help"></select><p id="feed-help">Changing feeds stops playback. Press Play to start the new feed at 0 seconds, then check alignment.</p></div>
 <div class="transport"><button id="connect" class="primary">Play Duke audio</button><button id="pause" disabled>Pause audio</button><button id="stop" disabled aria-label="Disconnect audio">Stop</button></div>
 <button id="resume-position" hidden>TV paused too? Resume where I stopped</button>
 <div class="delay-display"><p>Audio delay you’ve added</p><div><output id="delay">0.00</output><span>seconds</span></div><p id="buffer">History fills as you listen · up to 3 minutes</p></div>

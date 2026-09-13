@@ -14,3 +14,4 @@
 .sync-clock-form button { margin-bottom:0; }
 .sync-matches button { display:block; width:100%; text-align:left; margin:10px 0; }
 #sync-panel details { margin-top:24px; }
+.feed-picker{margin-bottom:16px}.feed-picker label{display:block;font-size:13px;margin-bottom:8px}.feed-picker p{font-size:12px;line-height:1.5;color:#b5c3d6;margin:8px 0 0}
