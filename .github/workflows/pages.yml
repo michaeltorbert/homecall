@@ -22,7 +22,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run test:worker
       - run: npm run build
+        env:
+          VITE_GATEWAY_ORIGIN: ${{ vars.VITE_GATEWAY_ORIGIN || 'https://homecall-metadata.homecall.workers.dev' }}
+          REQUIRE_GATEWAY: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/upload-pages-artifact@v4
         if: github.ref == 'refs/heads/main'
         with:

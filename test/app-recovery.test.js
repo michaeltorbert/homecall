@@ -8,19 +8,19 @@ import { teams, getSources } from '../src/teams.js';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 const settle=()=>new Promise(r=>setImmediate(r));
-function harness(t) {
+function harness(t, catalogFactory) {
  const dom=new JSDOM(html,{url:'https://example.test/',runScripts:'outside-only'}),w=dom.window;
- t.after(()=>w.close());let player;
+ t.after(()=>w.close());let player, catalog;
  class FakePlayer {
   constructor(update,event){this.update=update;this.event=event;this.sequence=0;this.epoch=0;player=this;this.starts=[];}
-  start(url,delay){this.starts.push({url,delay});this.context={state:'running'};this.audio={paused:false};return Promise.resolve();}
+  start(url,delay){this.starts.push({url,delay});this.context={state:'running'};this.audio={paused:false};if(this.failNext){this.failNext=false;return Promise.reject(Error('source-error'))}return Promise.resolve();}
   stop(){this.context=null;this.audio=null;}
   command(type,value){this.lastCommand={type,value};return Promise.resolve({result:'applied',before:{delay:35},after:{delay:35},contextSeconds:1});}
   resumeContext(){return Promise.resolve();}
  }
- Object.assign(w,{PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
+ Object.assign(w,{setupSync:()=>({}),setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,stop(){},setEnabled(){}}),PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
- w.URL.revokeObjectURL=()=>{};w.eval(source);return {w,player,$:id=>w.document.getElementById(id)};
+ w.URL.revokeObjectURL=()=>{};w.eval(source);return {w,player,get catalog(){return catalog},$:id=>w.document.getElementById(id)};
 }
 test('reconnect and reload restore the saved source delay without replacing it with refill state',async t=>{
  const h=harness(t);h.$('connect').click();await settle();assert.equal(h.player.starts[0].delay,35);
@@ -80,6 +80,24 @@ test('a stale playing snapshot cannot erase a native pause awaiting recovery',as
  h.player.audio.paused=false;h.$('pause').click();await settle();assert.equal(h.player.starts.length,2);
 });
 
+test('failed GT startup refreshes catalog before retry and refuses a withdrawn feed',async t=>{
+ const first={id:'game-one',url:'https://example.cloudfront.net/one.m3u8',opponent:'Tennessee'};
+ const next={...first,url:'https://example.cloudfront.net/replacement.m3u8'};
+ let refreshed=0;
+ const h=harness(t,callbacks=>({ready:first,stop(){},setEnabled(){},async refresh(){this.ready=null;callbacks.onChange();this.ready=++refreshed===1?next:null;callbacks.onReady()}}));
+ h.$('team').value='gt';h.$('team').onchange();h.player.failNext=true;h.$('connect').click();await settle();
+ assert.equal(refreshed,1);assert.equal(h.catalog.ready.url,next.url);assert.equal(h.$('connect').disabled,false);
+ h.player.failNext=true;h.$('connect').click();await settle();assert.equal(h.player.starts[1].url,next.url);assert.equal(refreshed,2);assert.equal(h.$('connect').disabled,true);
+});
+test('GT reconnect refreshes before Play and delay memory belongs to the selected game',async t=>{
+ const game={id:'game-one',url:'https://example.cloudfront.net/one.m3u8',opponent:'Tennessee'};let refreshed=0;
+ const h=harness(t,callbacks=>({ready:game,stop(){},setEnabled(){},async refresh(){refreshed++;callbacks.onChange();callbacks.onReady()}}));
+ h.$('team').value='gt';h.$('team').onchange();h.$('connect').click();await settle();assert.equal(h.player.starts[0].delay,0);
+ h.player.update({delay:7,resumeDelay:7,available:10,paused:false,ingesting:true,holding:false,restoring:null});
+ h.$('connect').click();await settle();assert.equal(refreshed,1);assert.equal(h.player.starts.length,1);
+ h.$('connect').click();await settle();assert.equal(h.player.starts[1].delay,7);
+ h.$('stop').click();h.catalog.ready={...game,id:'game-two'};h.$('connect').click();await settle();assert.equal(h.player.starts[2].delay,0);
+});
 test('choosing a backup stops playback, resets delay and logs the actual source',async t=>{
  const h=harness(t);h.$('connect').click();await settle();
  h.player.update({delay:35,available:40,paused:false,holding:false,ingesting:true,restoring:null});

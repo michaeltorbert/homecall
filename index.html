@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10151e"><title>Homecall · Your team's call</title><link rel="stylesheet" href="./style.css"></head>
 <body><header><a class="brand" href="./">Homecall<span>YOUR TEAM’S CALL</span></a><span class="badge">Manual sync · v1</span></header>
-<nav class="mode-tabs" role="tablist" aria-label="Broadcast mode"><button id="live-tab" role="tab" aria-selected="true" aria-controls="live-panel">Live</button><button id="archive-tab" role="tab" aria-selected="false" aria-controls="archive-panel" tabindex="-1">Archive</button></nav>
+<nav class="mode-tabs" role="tablist" aria-label="Broadcast mode"><button id="live-tab" role="tab" aria-selected="true" aria-controls="live-panel">Live</button><button id="sync-tab" role="tab" aria-selected="false" aria-controls="sync-panel" tabindex="-1">Sync</button><button id="archive-tab" role="tab" aria-selected="false" aria-controls="archive-panel" tabindex="-1">Archive</button></nav>
 <main><section id="live-panel" role="tabpanel" aria-labelledby="live-tab" class="console">
-<div class="team-row"><label for="team">Your team</label><select id="team"><option value="duke">Duke · Blue Devils</option><option value="miami">Miami · Hurricanes</option><option value="vt">Virginia Tech · Hokies</option></select></div>
+<div class="team-row"><label for="team">Your team</label><select id="team"><option value="duke">Duke · Blue Devils</option><option value="miami">Miami · Hurricanes</option><option value="vt">Virginia Tech · Hokies</option><option value="gt">Georgia Tech · Yellow Jackets</option></select></div>
+<section id="game-panel" hidden><label for="game">Football game</label><select id="game" disabled></select><p id="game-note" role="status"></p><button id="game-refresh">Refresh games</button></section>
 <div class="station-row"><div><p class="eyebrow">INTERNET AUDIO</p><h1 id="station">Duke Sports Network</h1></div><span id="status" role="status">Disconnected</span></div>
 <div id="feed-picker" class="feed-picker" hidden><label for="feed">Audio feed</label><select id="feed" aria-describedby="feed-help"></select><p id="feed-help">Changing feeds stops playback. Press Play to start the new feed at 0 seconds, then check alignment.</p></div>
 <div class="transport"><button id="connect" class="primary">Play Duke audio</button><button id="pause" disabled>Pause audio</button><button id="stop" disabled aria-label="Disconnect audio">Stop</button></div>
@@ -16,6 +17,20 @@
 <section class="sync"><div><h2>Match a play</h2><p id="sync-help">When the call comes before the picture, tap as you hear a distinct play. Tap again when you see it on TV.</p></div><button id="hold" class="primary" disabled>I heard the play · hold audio</button><button id="cancel" hidden>Cancel match</button><button id="confirm" disabled>Sounds aligned ✓</button></section>
 <p id="notice" class="notice" role="status" aria-live="polite">Pick a team and press Play. Keep this page open while listening.</p>
 <div class="volume"><label for="volume">Volume</label><input id="volume" type="range" min="0" max="1" step="0.01" value="0.8"></div>
+</section>
+<section id="sync-panel" role="tabpanel" aria-labelledby="sync-tab" class="console" hidden>
+<p class="eyebrow">MATCH THE CALL TO YOUR TV</p><h1>Sync <span class="badge">Experimental</span></h1>
+<p>Choose a broadcast and timing source, then find a recorded play using the clock on your TV. Confirm its description before moving audio, and fine-tune by ear.</p>
+<label for="sync-team">School</label><select id="sync-team" disabled></select><p id="sync-team-note" role="status"></p><button id="sync-teams-retry">Reload schools</button>
+<section id="sync-game-panel" hidden><label for="sync-game">Football game</label><select id="sync-game" disabled></select><p id="sync-game-note" role="status"></p><button id="sync-game-refresh">Refresh games</button></section>
+<h2 id="sync-title">Choose a game</h2><audio id="sync-audio" controls preload="none"></audio>
+<div class="sync-times"><p>Last recorded play at this audio position <strong id="sync-mapped">No matching play anchor</strong></p><p>Audio real time <strong id="sync-audio-time">Start audio to see its timestamp</strong></p><p>Current time <span id="sync-now">—</span></p><p>Recorded plays inside the audio window <strong id="sync-range">Start playback to see the range</strong></p><small id="sync-range-note"></small></div>
+<p id="sync-mapping-note" role="status"></p>
+<form id="sync-clock-form" class="sync-clock-form"><div><label for="sync-quarter">Quarter</label><select id="sync-quarter"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select></div><div><label for="sync-clock">TV game clock</label><input id="sync-clock" inputmode="numeric" placeholder="7:29" autocomplete="off"></div><button id="sync-apply" class="primary" disabled>Find recorded play</button></form>
+<p id="sync-result" role="status"></p><div id="sync-matches" class="sync-matches"></div>
+<div class="transport"><button id="sync-play" class="primary" disabled>Play / reconnect feed</button><button id="sync-stop" disabled>Stop</button><button id="sync-incoming" disabled>Jump to incoming audio</button></div><p id="sync-playback" role="status">Stopped.</p>
+<p>Move audio back to add delay; move it ahead to reduce delay.</p><div class="nudges"><button data-sync-nudge="-1" disabled>Back 1 s</button><button data-sync-nudge="-0.25" disabled>Back ¼ s</button><button data-sync-nudge="0.25" disabled>Ahead ¼ s</button><button data-sync-nudge="1" disabled>Ahead 1 s</button></div>
+<details><summary>Timing adjustment</summary><label for="sync-offset">Audio timestamp offset (seconds)</label><input id="sync-offset" type="number" value="0" step="0.25"><p>Positive values seek later than the reported play timestamp. Adjust only after comparing a distinct play with the commentary. This does not calibrate automatic synchronization.</p></details>
 </section>
 <section id="archive-panel" role="tabpanel" aria-labelledby="archive-tab" class="console" hidden>
 <p class="eyebrow">THE CALLS WORTH COMING BACK TO</p><h1>Archive</h1><p>Pick your school. Find a past game. Hear it again.</p>

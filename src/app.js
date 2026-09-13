@@ -1,6 +1,8 @@
+import { setupSync } from './sync.js';
 import { PlaybackMemory } from './playback-memory.js';
 import { setupArchive } from './archive.js';
 import { teams, getSources } from './teams.js';
+import { setupHomestream } from './homestream-ui.js';
 import { Player } from './player.js';
 import { SessionLog } from './session-log.js';
 import { demoURL } from './demo.js';
@@ -44,6 +46,7 @@ const player = new Player(update, event => {
   }
   render();
 });
+const catalog = setupHomestream({ onChange: disconnect, onReady: render });
 function update(value) {
   if (value === null && active) {
     log.end(state); active = false; sourceStatus = 'Disconnected';
@@ -68,7 +71,7 @@ function render() {
   const positionReady = ready && !restoring && player.context?.state === 'running';
   $('status').textContent = restoring ? `Restoring ${state.restoring.toFixed(1)}-second delay · ${Math.max(0, state.restoring - state.available).toFixed(0)} s of audio still needed` : connecting ? 'Connecting…' : sourceStatus;
   $('connect').textContent = active ? 'Reconnect audio' : `Play ${teams[selected].name} audio`;
-  $('connect').disabled = connecting;
+  $('connect').disabled = connecting || (teams[selected].discovery === 'homestream' && !catalog.ready);
   $('stop').disabled = !active && !connecting;
   $('pause').disabled = !ready || (restoring && player.context?.state === 'running' && !player.audio?.paused) || holding || specialPending;
   $('pause').textContent = state?.paused || player.audio?.paused || player.context?.state !== 'running' ? 'Resume audio' : 'Pause audio';
@@ -104,7 +107,7 @@ function connectionHelp() {
 function showSource() {
   const source = currentSource();
   $('station').textContent = source.station; $('official').href = source.official;
-  $('source-note').textContent = source.note || (source.sourceId !== teams[selected].sourceId
+  $('source-note').textContent = source.note || (source.discovery === 'homestream' ? 'Choose a published game feed. Availability is checked before Play. Reconnect refreshes the catalog; press Play again when ready. Delay controls work on incoming audio, just like the other teams.' : source.sourceId !== teams[selected].sourceId
     ? 'Duke affiliate station. Game and postgame coverage can change; check that you hear the broadcast you want.'
     : selected === 'miami' ? 'WQAM’s live station stream. Scheduled games may be subject to streaming rights and location restrictions; station audio does not prove the game is on air.'
     : 'Live network channel. Game coverage depends on the broadcaster; an empty or expired schedule does not disable this channel.');
@@ -114,6 +117,7 @@ function teamChanged() {
   selectedSourceId = teams[selected].sourceId; resetSourceDelay = false;
   try { storage?.setItem('mystream.team', selected); } catch {}
   const team = teams[selected], sources = getSources(selected);
+  catalog.setEnabled(team.discovery === 'homestream');
   document.documentElement.style.setProperty('--accent', team.color);
   $('feed').replaceChildren();
   for (const source of sources) {
@@ -130,25 +134,29 @@ function sourceChanged() {
   showSource(); notice(`Ready for ${currentSource().station}. Press Play to start at 0 seconds, then check alignment.`); render();
 }
 function disconnect() {
-  ++generation; sourcePaused = false; liveKey = null; savedDelay = null; log.end(state); player.stop();
+  catalog.stop(); ++generation; sourcePaused = false; liveKey = null; savedDelay = null; log.end(state); player.stop();
   if (demo) URL.revokeObjectURL(demo); demo = null;
   state = null; active = connecting = false; pending = 0; specialPending = false;
   needsCheck = true; sourceStatus = 'Disconnected'; refreshSessions(); render();
 }
 async function connect(useDemo = false) {
+  const game = teams[selected].discovery === 'homestream' && !useDemo ? catalog.ready : null;
+  if (!useDemo && teams[selected].discovery === 'homestream') {
+    if (active || !game) { await catalog.refresh(); return; }
+  }
   disconnect(); const mine = generation;
   active = connecting = true;
-  const source = currentSource();
-  liveKey = useDemo ? null : source.sourceId;
+  const team = teams[selected], source = currentSource();
+  liveKey = useDemo ? null : game ? `${source.sourceId}:${game.id}` : source.sourceId;
   savedDelay = liveKey ? resetSourceDelay ? 0 : memory.read('live', liveKey)?.value ?? null : null;
   const restoreDelay = savedDelay ?? 0;
   log.start(selected, useDemo ? 'test-tone' : source.sourceId, useDemo ? 'demo' : 'live', $('provider').value, $('output').value);
   sourceStatus = 'Connecting'; notice('Connecting to the audio source…');
-  $('station').textContent = useDemo ? 'Timing demo · repeating tones' : source.station;
+  $('station').textContent = useDemo ? 'Timing demo · repeating tones' : game ? `${team.name} vs ${game.opponent}` : source.station;
   refreshSessions(log.session.id); render();
   try {
-    const url = useDemo ? (demo = demoURL()) : source.url;
-    const started = player.start(url, restoreDelay);
+    const url = useDemo ? (demo = demoURL()) : game ? game.url : source.url;
+    const started = player.start(url, restoreDelay, { hls: !!game });
     if (useDemo && player.audio) player.audio.loop = true;
     await started;
     if (mine !== generation) return;
@@ -163,6 +171,7 @@ async function connect(useDemo = false) {
     active = connecting = false; state = null; sourceStatus = 'Could not connect';
     notice(connectionHelp());
     refreshSessions();
+    if (game) { await catalog.refresh(); return; }
   }
   render();
 }
@@ -288,4 +297,4 @@ window.addEventListener('pagehide', () => { log.boundary('hidden', state); });
 setInterval(() => { if (active && state) log.heartbeat(state, !document.hidden && player.context?.state === 'running'); }, 30000);
 teamChanged(); refreshSessions(); render();
 
-setupArchive({ stopLive: disconnect, selectedTeam: () => selected, memory });
+setupArchive({ stopLive: disconnect, selectedTeam: () => selected, memory, sync: setupSync({ initialSchool: () => teams[selected].name }) });

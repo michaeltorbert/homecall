@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 function deferred() { let resolve,reject; const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject}; }
 function harness(timing = {}) {
-  const contexts=[],audios=[],nodes=[],events=[],states=[];
+  const contexts=[],audios=[],nodes=[],events=[],states=[],transports=[];
   class Context {
     constructor(){this.state='running';this.module=deferred();this.audioWorklet={addModule:()=>this.module.promise};contexts.push(this);}
     resume(){this.state='running';return Promise.resolve();}
@@ -23,11 +23,20 @@ function harness(timing = {}) {
     connect(){}
     ack(index=0){const m=this.messages[index];this.port.onmessage({data:{type:'ack',...m,action:m.type,type:'ack',result:'applied',after:{delay:0,paused:false},contextSeconds:1}});}
   }
-  const sandbox=vm.createContext({window:{AudioContext:Context,AudioWorkletNode:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout:timing.setTimeout || setTimeout,clearTimeout:timing.clearTimeout || clearTimeout});
-  const source=fs.readFileSync(new URL('../src/player.js',import.meta.url),'utf8').replace(/^import .*;\n/,'').replace('export class Player','class Player');
+  class Hls {
+    static Events={ERROR:'error'};
+    static isSupported(){return !!timing.hls;}
+    constructor(){this.handlers={};transports.push(this);}
+    on(type,fn){this.handlers[type]=fn;}
+    loadSource(url){this.url=url;}
+    attachMedia(audio){this.audio=audio;}
+    destroy(){this.destroyed=true;}
+  }
+  const sandbox=vm.createContext({Hls,window:{AudioContext:Context,AudioWorkletNode:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout:timing.setTimeout || setTimeout,clearTimeout:timing.clearTimeout || clearTimeout});
+  const source=fs.readFileSync(new URL('../src/player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class Player','class Player');
   vm.runInContext(source+'\nglobalThis.Player = Player;',sandbox);
   const player=new sandbox.Player(s=>states.push(s),e=>events.push(e));
-  return{player,contexts,audios,nodes,events,states};
+  return{player,contexts,audios,nodes,events,states,transports};
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function connect(h){const started=h.player.start('https://fixture/stream');const a=h.audios.at(-1);a.onplaying();a.played.resolve();h.contexts.at(-1).module.resolve();await tick();h.nodes.at(-1).ack();await started;}
@@ -133,4 +142,18 @@ test('media resuming before its context cannot consume the continuity checkpoint
  const h=harness();await connect(h);const c=h.contexts[0],a=h.audios[0],n=h.nodes[0];a.currentTime=10;c.state='suspended';c.onstatechange();n.ack(1);
  a.onplaying();assert.equal(n.messages.length,2);a.currentTime=15;c.state='running';c.onstatechange();
  assert.equal(n.messages[2].type,'ingest');assert.equal(n.messages[2].value,true);n.ack(2);h.player.stop();
+});
+
+test('HLS feeds use the same worklet and restore path, and destroy transport on source switch',async()=>{
+ const h=harness({hls:true});const started=h.player.start('https://fixture/live.m3u8',5,{hls:true});
+ assert.equal(h.transports[0].audio,h.audios[0]);assert.equal(h.transports[0].url,'https://fixture/live.m3u8');
+ h.audios[0].onplaying();h.audios[0].played.resolve();h.contexts[0].module.resolve();await tick();
+ const n=h.nodes[0];assert.equal(n.messages[0].type,'restore');assert.equal(n.messages[0].value,5);n.ack(0);await tick();n.ack(1);await started;
+ h.player.stop();assert.equal(h.transports[0].destroyed,true);assert.equal(h.contexts[0].closed,true);
+});
+test('fatal HLS startup error closes the transport and stale transport callbacks are ignored',async()=>{
+ const h=harness({hls:true});const started=h.player.start('https://fixture/live.m3u8',0,{hls:true});
+ const rejected=assert.rejects(started,/hls-error/);const callback=h.transports[0].handlers.error;
+ callback(null,{fatal:true});h.contexts[0].module.resolve();await rejected;assert.equal(h.transports[0].destroyed,true);
+ const count=h.events.length;callback(null,{fatal:true});assert.equal(h.events.length,count);
 });

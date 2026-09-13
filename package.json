@@ -7,12 +7,21 @@
     "test": "node --test test/*.test.js",
     "start": "node server.mjs",
     "refresh:archive": "node scripts/refresh-archive.mjs",
-    "build": "node scripts/refresh-archive.mjs && vite build"
+    "build": "npm run check:gateway && node scripts/refresh-archive.mjs && vite build",
+    "check:gateway": "node scripts/check-gateway.mjs",
+    "worker:dev": "wrangler dev --local --env local --ip 127.0.0.1 --port 8787",
+    "worker:dry-run": "wrangler deploy --env=\"\" --dry-run --outdir output/worker-dry-run",
+    "worker:deploy": "wrangler deploy --env=\"\"",
+    "worker:types": "wrangler types output/worker-configuration.d.ts",
+    "test:worker": "node scripts/test-worker.mjs"
   },
   "dependencies": {
+    "hls.js": "^1.7.3",
     "vite": "8.2.2"
   },
   "devDependencies": {
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "miniflare": "5.20260911.0-alpha",
+    "wrangler": "4.131.1"
   }
 }

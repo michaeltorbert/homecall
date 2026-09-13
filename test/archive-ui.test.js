@@ -6,7 +6,7 @@ import { setupArchive } from '../src/archive.js';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const item={id:'one',opponent:'Tulane',sport:'Football',start:'2026-09-05T18:00:00Z',kind:'Game recording',url:'https://s3.amazonaws.com/archive.leanplayer.com/gameday/1788631200_35_70596105.mp3'};
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-function harness(t, fetcher, memory) {
+function harness(t, fetcher, memory, sync) {
   const dom=new JSDOM(html,{url:'https://example.test/homecall/'});
   t.mock.method(globalThis,'fetch',fetcher || (async()=>({ok:true,json:async()=>({checkedAt:'2026-09-11T00:00:00Z',schools:{duke:{status:'ready',source:'https://duke.leanplayer.com/',items:[item]},miami:{status:'external',source:'https://miamihurricanes.com/',items:[]},vt:{status:'ready',source:'https://hokiesports.com/',items:[]}}})})));
   const oldDocument=globalThis.document,oldOption=globalThis.Option;
@@ -15,7 +15,7 @@ function harness(t, fetcher, memory) {
   const $=id=>document.getElementById(id), audio=$('replay-audio');
   let stops=0,paused=0,loads=0,plays=0;
   audio.pause=()=>{paused++;}; audio.load=()=>{loads++;};audio.play=async()=>{plays++;};
-  setupArchive({stopLive:()=>{stops++;},selectedTeam:()=> 'duke',memory});
+  setupArchive({stopLive:()=>{stops++;},selectedTeam:()=> 'duke',memory,sync});
   return {$,audio,counts:()=>({stops,paused,loads,plays}),dom};
 }
 test('archive stops live audio, supports playback, filters and unloads when leaving or changing school',async t=>{
@@ -128,4 +128,12 @@ test('unknown recording duration cannot block bookmarks after playback progresse
  Object.defineProperty(h.audio,'duration',{value:Infinity});Object.defineProperty(h.audio,'readyState',{value:1});Object.defineProperty(h.audio,'paused',{value:false});
  h.audio.dispatchEvent(new h.dom.window.Event('loadedmetadata'));h.audio.dispatchEvent(new h.dom.window.Event('playing'));
  h.audio.currentTime=3;h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.deepEqual(saved.at(-1),['replay','duke:one',3]);
+});
+
+test('Sync tab owns playback exclusively and keyboard navigation includes all three modes',async t=>{
+ let activated=0,deactivated=0;const sync={activate(){activated++},deactivate(){deactivated++}};
+ const h=harness(t,undefined,undefined,sync);await settle();h.$('sync-tab').click();
+ assert.equal(activated,1);assert.equal(h.$('sync-panel').hidden,false);assert.equal(h.$('live-panel').hidden,true);assert.equal(h.$('archive-panel').hidden,true);assert.equal(h.counts().stops,1);
+ h.$('sync-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'archive-tab');assert.equal(h.$('sync-panel').hidden,true);assert.equal(deactivated,2);
+ h.$('archive-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'live-tab');assert.equal(h.$('live-panel').hidden,false);
 });

@@ -1,6 +1,6 @@
 import { teams } from './teams.js';
 import { filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
-export function setupArchive({ stopLive, selectedTeam, memory }) {
+export function setupArchive({ stopLive, selectedTeam, memory, sync = null }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
   let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
@@ -19,25 +19,27 @@ export function setupArchive({ stopLive, selectedTeam, memory }) {
   function stop() {
     savePosition(); replayKey = null; restorePosition = null; ++playRequest; stopReplay(audio); current = null; $('replay-player').hidden = true;
   }
+  const modes = sync ? ['live', 'sync', 'archive'] : ['live', 'archive'];
   function selectMode(next) {
     if (next === mode) return;
     mode = next;
-    stopLive(); stop();
-    for (const name of ['live', 'archive']) {
+    stopLive(); stop(); sync?.deactivate();
+    for (const name of modes) {
       $(`${name}-tab`).setAttribute('aria-selected', String(name === mode));
       $(`${name}-tab`).tabIndex = name === mode ? 0 : -1;
     }
     $('live-panel').hidden = mode !== 'live';
     $('archive-panel').hidden = mode !== 'archive';
     $('live-sidebar').hidden = mode !== 'live';
-    if (mode === 'archive') { $('archive-team').value = selectedTeam(); render(true); }
+    if (sync) { $('sync-panel').hidden = mode !== 'sync'; if (mode === 'sync') sync.activate(); }
+    if (mode === 'archive') { $('archive-team').value = [...$('archive-team').options].some(o => o.value === selectedTeam()) ? selectedTeam() : 'duke'; render(true); }
   }
-  for (const name of ['live', 'archive']) {
+  for (const name of modes) {
     $(`${name}-tab`).onclick = () => selectMode(name);
     $(`${name}-tab`).onkeydown = event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
-      const next = event.key === 'Home' ? 'live' : event.key === 'End' ? 'archive' : mode === 'live' ? 'archive' : 'live';
+      const next = event.key === 'Home' ? modes[0] : event.key === 'End' ? modes.at(-1) : modes[(modes.indexOf(mode) + (event.key === 'ArrowRight' ? 1 : modes.length-1)) % modes.length];
       selectMode(next); $(`${next}-tab`).focus();
     };
   }

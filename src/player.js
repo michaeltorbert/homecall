@@ -1,10 +1,11 @@
+import Hls from 'hls.js';
 import workletURL from './audio-worklet.js?worker&url';
 export class Player {
   constructor(onState, onEvent) {
     this.onState = onState; this.onEvent = onEvent;
     this.epoch = 0; this.sequence = 0; this.pending = new Map(); this.state = null;
   }
-  async start(url, delay = 0) {
+  async start(url, delay = 0, { hls = false } = {}) {
     this.stop();
     const epoch = this.epoch;
     const Context = window.AudioContext || window.webkitAudioContext;
@@ -34,7 +35,7 @@ export class Player {
     };
     // Resume and media.play originate in this click; do not wait for module download first.
     const resumed = context.resume();
-    audio.src = url;
+
     audio.onplaying = () => {
       if (!valid()) return;
       this.mediaPlaying = true;
@@ -54,10 +55,20 @@ export class Player {
     audio.onerror = () => interrupted('source-error');
     // Connect before play so the element never bypasses the delay engine.
     const source = this.source = context.createMediaElementSource(audio);
+    let failHls;
+    const hlsFailure = new Promise((_, reject) => { failHls = reject; });
+    if (hls && Hls.isSupported()) {
+      const transport = this.hls = new Hls({ maxBufferLength: 12, backBufferLength: 0 });
+      transport.on(Hls.Events.ERROR, (_, data) => {
+        if (valid() && data.fatal) { failHls(new Error('hls-error')); interrupted('source-error'); }
+      });
+      transport.loadSource(url); transport.attachMedia(audio);
+    } else if (!hls || audio.canPlayType('application/vnd.apple.mpegurl')) audio.src = url;
+    else { this.stop(); throw new Error('hls-unsupported'); }
     const played = audio.play();
     let startupTimer;
     const deadline = new Promise((_, reject) => { startupTimer = setTimeout(() => reject(new Error('source-timeout')), 20000); });
-    const settled = Promise.race([Promise.all([resumed, played]), deadline]); settled.catch(() => {});
+    const settled = Promise.race([Promise.all([resumed, played]), deadline, hlsFailure]); settled.catch(() => {});
     try {
       await Promise.race([context.audioWorklet.addModule(workletURL), deadline]);
       if (!valid()) return;
@@ -127,6 +138,7 @@ export class Player {
     ++this.epoch;
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('disconnected')); }
     this.pending.clear();
+    if (this.hls) { this.hls.destroy(); this.hls = null; }
     if (this.audio) {
       this.audio.onplaying = this.audio.onwaiting = this.audio.onstalled = this.audio.onended = this.audio.onpause = this.audio.onerror = null;
       this.audio.pause(); this.audio.removeAttribute('src'); this.audio.load();

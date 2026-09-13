@@ -15,3 +15,7 @@ __pycache__/
 *.log
 
 public/archive.json
+
+.wrangler/
+.dev.vars
+.dev.vars.*
