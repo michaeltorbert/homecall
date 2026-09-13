@@ -1,20 +1,30 @@
+import { browserTiming } from './timing-transport.js';
 import { createTimingFreshness, nextPollDelay } from './timing-freshness.js';
 import { metadataURL } from './gateway.js';
 import { readJSON } from './homestream.js';
 import { setupHomestream } from './homestream-ui.js';
 import { SyncPlayer } from './sync-player.js';
-import { schoolKey, matchEvent, availableAnchors, selectAnchors, gameOrder, playLabel } from './sync-mapping.js';
+import { schoolKey, footballSeason, matchEvent, availableAnchors, selectAnchors, gameOrder, playLabel } from './sync-mapping.js';
 export function setupSync({ initialSchool = () => 'Duke' } = {}) {
   const $ = id => document.getElementById(`sync-${id}`);
   const audio = $('audio'), player = new SyncPlayer(audio, text => { $('playback').textContent = text; });
-  let active = false, teamsController, mappingController, pollTimer, plays = [], conflict = false, calibrationKey = null;
+  let active = false, teamsController, mappingController, pollTimer, plays = [], conflict = false, calibrationKey = null, selectionKey = null, snapshot = 0;
   const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
   const freshness = createTimingFreshness();
+  const retry = document.createElement('button');
+  retry.id = 'sync-timing-retry'; retry.type = 'button'; retry.textContent = 'Retry game timing'; retry.hidden = true;
+  $('mapping-note').after(retry);
+  const sourceLabel = document.createElement('label'), source = document.createElement('select');
+  sourceLabel.htmlFor = 'sync-timing-source'; sourceLabel.textContent = 'Game timing source'; source.id = 'sync-timing-source';
+  for (const [value, label] of [['gateway', 'Homecall service'], ['browser', 'Browser · manual sync only']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; source.append(option); }
+  retry.after(sourceLabel, source);
+  source.onchange = () => { calibrationKey = null; $('offset').value = '0'; clearMapping(); if (active && catalog.ready) void loadMapping(catalog.ready); render(); };
+  retry.onclick = () => { if (active && catalog.ready) void loadMapping(catalog.ready); };
   const school = () => $('team').selectedOptions[0]?.textContent || initialSchool();
   const offset = () => { const n = Number($('offset').value); return Number.isFinite(n) ? n : 0; };
   function clearMapping() {
     mappingController?.abort(); mappingController = null; clearTimeout(pollTimer);
-    plays = []; freshness.invalidate(); conflict = false; $('matches').replaceChildren();
+    plays = []; freshness.invalidate(); conflict = false; snapshot++; $('matches').replaceChildren(); retry.hidden = true;
     $('mapping-note').textContent = 'Waiting for game timing data.';
   }
   function reset() {
@@ -23,45 +33,52 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
   }
   async function loadMapping(game) {
     clearMapping();
-    if (document.visibilityState === 'hidden') return;
+    if (!active || document.visibilityState === 'hidden') return;
     const controller = mappingController = new AbortController(), signal = controller.signal;
+    const transport = source.value;
+    const timingRead = path => transport === 'browser' ? browserTiming(path, {signal}) : readJSON(api(path), {signal});
     $('mapping-note').textContent = 'Finding matching game timing…';
     try {
       const espnTeams = await readJSON(api('sync/teams'), {signal});
       if (signal.aborted) return;
-      const matches = espnTeams.filter(t => schoolKey(t.name) === schoolKey(school()));
+      const matches = espnTeams.filter(t => t.homestreamId === $('team').value && schoolKey(t.name) === schoolKey(school()));
       if (matches.length !== 1 || !Number.isFinite(game.start)) throw Error();
-      const schedule = await readJSON(api(`sync/schedule/${matches[0].id}/${new Date(game.start).getUTCFullYear()}`), {signal});
+      const schedule = await timingRead(`sync/schedule/${matches[0].id}/${footballSeason(game.start)}`);
       if (signal.aborted) return;
-      const event = matchEvent(schedule, school(), game);
+      const event = matchEvent(schedule, school(), game, matches[0].id);
       if (!event) throw Error();
+      const key = `${event.id}:${game.url}`;
+      if (key !== calibrationKey) { $('offset').value = '0'; calibrationKey = key; }
+      const expectedTeams = [...event.teamIds].sort().join('|');
       let pollDelay = 15000;
       async function poll() {
         const started = freshness.start();
         let success = false;
         try {
-          const data = await readJSON(api(`sync/plays/${event.id}`), {signal});
+          const data = await timingRead(`sync/plays/${event.id}`);
           if (signal.aborted) return;
-          if (!Array.isArray(data.plays) || typeof data.conflict !== 'boolean') throw Error('timing-invalid');
-          plays = data.plays; conflict = data.conflict; freshness.receive(data, started); success = true;
-          $('mapping-note').textContent = conflict ? 'Estimated only: some sports-data timestamps are out of order. Confirm against the commentary.' : 'Estimated play anchors; a stopped game clock can match more than one play.';
-        } catch { if (!signal.aborted) $('mapping-note').textContent = 'Game timing is unavailable or the service limit was reached. Retrying less often; older anchors expire and manual audio controls still work.'; }
+          if (data.schemaVersion !== 2 || data.eventId !== event.id || data.season !== event.season || !Array.isArray(data.teamIds) || [...data.teamIds].sort().join('|') !== expectedTeams || !Array.isArray(data.plays) || typeof data.conflict !== 'boolean') throw Error('timing-invalid');
+          snapshot++; $('matches').replaceChildren(); plays = data.plays; conflict = data.conflict; freshness.receive(transport === 'browser' ? {...data, ageMs:null} : data, started); success = true;
+          retry.hidden = true;
+          $('mapping-note').textContent = transport === 'browser' || data.ageMs === null ? 'Recorded play anchors; freshness is unknown, so game-clock seeking is unavailable. Manual audio adjustments still work.' : conflict ? 'Estimated only: some sports-data timestamps are out of order. Confirm against the commentary.' : 'Estimated play anchors; a stopped game clock can match more than one play.';
+        } catch { if (!signal.aborted) { retry.hidden = false; $('mapping-note').textContent = 'Game timing is unavailable or the service limit was reached. Retrying less often; older anchors expire and manual audio controls still work.'; } }
         if (!signal.aborted) { render(); if (success) pollDelay = 15000; pollTimer = setTimeout(poll,pollDelay); pollDelay = nextPollDelay(pollDelay, success); }
       }
       await poll();
     } catch {
-      if (!signal.aborted) $('mapping-note').textContent = 'No unique matching game timing is available. You can still listen and adjust the audio manually.';
+      if (!signal.aborted) { retry.hidden = false; $('mapping-note').textContent = 'No unique supported game timing is available. Retry timing without restarting audio, or adjust the audio manually.'; }
     }
   }
   const catalog = setupHomestream({prefix:'sync-',school,onChange:reset,onReady:() => {
     if (catalog.ready) {
-      const key = `${school()}:${catalog.ready.id}`;
-      if (key !== calibrationKey) { $('offset').value = '0'; calibrationKey = key; }
+      const selected = `${$('team').value}:${catalog.ready.id}:${catalog.ready.url}`;
+      if (selected !== selectionKey) { $('offset').value = '0'; calibrationKey = null; selectionKey = selected; }
       $('title').textContent = `${school()} vs ${catalog.ready.opponent}`; loadMapping(catalog.ready); }
     render();
   }});
   function render() {
     const timing = player.timing(), fresh = freshness.fresh();
+    const ageLabel = freshness.status() === 'unknown' ? 'freshness unknown' : 'stale data';
     const anchors = availableAnchors(plays,timing,offset()).sort(gameOrder);
     $('play').disabled = !catalog.ready;
     $('stop').disabled = !player.active;
@@ -72,9 +89,9 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
     $('now').textContent = format(Date.now());
     $('audio-time').textContent = Number.isFinite(timing.utc) ? format(timing.utc) : player.active ? 'Timestamp unavailable in this browser or feed' : 'Start audio to see its timestamp';
     const previous = anchors.filter(p => p.position <= timing.position).sort((a,b) => a.position-b.position).at(-1);
-    $('mapped').textContent = previous ? `${playLabel(previous)} · estimated anchor${fresh?'':' · stale data'}` : 'No matching play anchor';
-    $('range').textContent = anchors.length ? `${playLabel(anchors[0])} → ${playLabel(anchors.at(-1))} (earliest → latest)${fresh?'':' · stale data'}` : 'No recorded plays inside the available audio window';
-    $('range-note').textContent = 'Estimated bounds. Times between recorded plays may be ambiguous; the game clock does not run continuously.';
+    $('mapped').textContent = previous ? `${playLabel(previous)} · estimated anchor${fresh?'':` · ${ageLabel}`}` : 'No matching play anchor';
+    $('range').textContent = anchors.length ? `${playLabel(anchors[0])} → ${playLabel(anchors.at(-1))} (earliest → latest)${fresh?'':` · ${ageLabel}`}` : 'No recorded plays inside the available audio window';
+    $('range-note').textContent = 'Estimated bounds. Times between recorded plays may be ambiguous; the game clock does not run continuously. Overtime uses manual audio adjustment.';
   }
   async function loadTeams() {
     teamsController?.abort(); const signal = (teamsController = new AbortController()).signal;
@@ -104,10 +121,10 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
     const delta = Number(b.dataset.syncNudge);
     $('result').textContent = player.seek(audio.currentTime+delta) ? 'Audio adjusted. Check alignment.' : 'Reached the available audio limit.';
   }; });
-  function applyAnchor(anchor) {
+  function applyAnchor(anchor, version) {
     // Recalculate against the current audio position/window, never a captured button position.
     const current = availableAnchors(plays,player.timing(),offset()).find(p => p.id === anchor.id);
-    if (!freshness.fresh() || !current || !player.seek(current.position)) {
+    if (version !== snapshot || !freshness.fresh() || !current || !player.seek(current.position)) {
       $('result').textContent = 'That play is no longer available. Check the range and try again.'; return;
     }
     $('result').textContent = `Moved to ${playLabel(current)} — estimated alignment. Press Play if paused, then compare with your TV.`;
@@ -117,14 +134,15 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
     if (!freshness.fresh()) { $('result').textContent = 'Wait for fresh game timing data.'; return; }
     const result = selectAnchors(availableAnchors(plays,player.timing(),offset()),Number($('quarter').value),$('clock').value);
     if (result.status !== 'ready') { $('result').textContent = result.status === 'invalid' ? 'Enter a clock from 0:00 to 15:00, such as 7:29.' : 'That clock is outside the available game-time anchors. Playback has not moved.'; return; }
-    if (result.matches.length === 1) { applyAnchor(result.matches[0]); if (result.distance) $('result').textContent += ` Nearest recorded play is ${result.distance} game-clock seconds away.`; }
+    const version = snapshot;
+    if (result.matches.length === 1 && result.distance === 0) applyAnchor(result.matches[0], version);
     else {
-      $('result').textContent = 'Several plays match that clock. Choose the play you see on TV:';
-      for (const p of result.matches) { const b = document.createElement('button'); b.type = 'button'; b.textContent = `${playLabel(p)} · ${p.text}`; b.onclick = () => applyAnchor(p); $('matches').append(b); }
+      $('result').textContent = result.distance ? `Nearest recorded play is ${result.distance} game-clock seconds away. Confirm a play below before moving audio:` : 'Several plays match that clock. Choose the play you see on TV:';
+      for (const p of result.matches) { const b = document.createElement('button'); b.type = 'button'; b.textContent = `${playLabel(p)} · ${p.text}`; b.onclick = () => applyAnchor(p, version); $('matches').append(b); }
     }
     render();
   };
-  $('offset').oninput = () => { $('matches').replaceChildren(); render(); };
+  $('offset').oninput = () => { snapshot++; $('matches').replaceChildren(); render(); };
   document.addEventListener('visibilitychange', () => {
     freshness.invalidate();
     if (!active) return;

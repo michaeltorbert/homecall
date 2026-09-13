@@ -18,8 +18,8 @@ const upstream = async request => {
   if (url.hostname === 'unexpected.invalid') throw Error('A redirect must never be followed');
   if (url.searchParams.get('event') === '3') return new FixtureResponse('<html>invalid</html>', { headers: { 'Content-Type': 'text/html' } });
   if (url.searchParams.get('event') === '4') return new FixtureResponse(' '.repeat(2 * 1024 * 1024 + 1), { headers: { 'Content-Type': 'application/json' } });
-  if (url.pathname.endsWith('/summary')) return FixtureResponse.json({header:{},drives:{previous:[],current:{plays:[]}}});
-  if (url.pathname.endsWith('/schedule')) return FixtureResponse.json({events:[]});
+  if (url.pathname.endsWith('/summary')) return FixtureResponse.json({header:{id:url.searchParams.get('event'),uid:`s:20~l:23~e:${url.searchParams.get('event')}`,league:{id:'23',slug:'college-football'},season:{year:2026},competitions:[{id:url.searchParams.get('event'),competitors:[{team:{id:'150'}},{team:{id:'356'}}]}]},drives:{previous:[],current:{plays:[]}}}, {headers:{Date:new Date().toUTCString(),Age:'2'}});
+  if (url.pathname.endsWith('/schedule')) return FixtureResponse.json({team:{id:'150'},season:{year:2026},events:[]});
   if (url.pathname.includes('/games/')) return FixtureResponse.json({success:true,games:[]});
   if (url.hostname.includes('espn.com')) return FixtureResponse.json({sports:[{leagues:[{teams:[]}]}]});
   return FixtureResponse.json({success:true,teams:[{team_id:uuid,school_name:'Georgia Tech'}]});
@@ -67,6 +67,9 @@ try {
   const response = await request('/api/sync/plays/1');
   const hit = await response.json();
   assert.equal(hit.checkedAt, first.checkedAt);
+  assert.equal(first.schemaVersion,2);
+  assert.equal(first.eventId,'1');
+  assert.ok(first.ageMs >= 3000);
   assert.ok(hit.ageMs > first.ageMs);
   assert.equal(calls, before + 1, 'Cache hit must avoid another fixture upstream call');
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), null);

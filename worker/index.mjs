@@ -10,6 +10,10 @@ export default {
     }
     let cache;
     try { cache = caches.default; } catch { /* Optional optimization. */ }
-    return metadataGateway(request, { origins, cache, ctx });
+    const routeFamily = new URL(request.url).pathname.split('/').slice(1, 4).join('/');
+    const allowedFamilies = ['api/sync/teams', 'api/sync/schedule', 'api/sync/plays', 'api/homestream/teams', 'api/homestream/games'];
+    const correlationId = crypto.randomUUID();
+    const diagnostic = detail => console.warn(JSON.stringify({ event: 'metadata-failure', version: 'timing-diagnostics-v1', correlationId, route: allowedFamilies.includes(routeFamily) ? routeFamily : 'unknown', ...detail }));
+    return metadataGateway(request, { origins, cache, ctx, diagnostic });
   }
 };

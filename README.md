@@ -235,3 +235,34 @@ known-good Worker version (`wrangler rollback` with the verified version/account
 or republish the last known-good frontend build. A gateway-origin change requires
 a frontend rebuild. Do not clear the required publishing variable to bypass a
 broken deployment; missing configuration is deliberately a publishing failure.
+
+
+### Timing repair status (September 12, 2026)
+
+The authorized production diagnostic deployment confirmed ESPN returns HTTP 403
+HTML to the Worker; this is the cause of the timing routes' 502 responses.
+Homestream discovery works independently. The supported-team endpoint now uses
+verified Duke, Georgia Tech, Virginia and Auburn ID associations rather than a
+large live ESPN team-list request. Games and stream URLs are still discovered
+from the public Homestream catalog.
+
+The Sync tab has a session-only **Game timing source** choice. **Homecall
+service** uses the gateway; **Browser · manual sync only** explicitly requests
+ESPN's public schedule/play routes from the browser. It does not switch
+silently on errors. The browser alternative preserves unknown freshness and
+cannot enable game-clock seeking; it can display recorded anchors when CORS
+and stream timestamps are available. Manual playback and delay controls remain
+usable. Retry timing does not restart audio.
+
+Timing schema 2 binds both teams, season and event identity. Upstream HTTP age,
+request duration and cache residence are counted conservatively; absent or
+invalid Date/Age evidence stays unknown. HTTP freshness still does not establish
+sports reporting latency or TV alignment. Repeated/nearest clocks require a
+choice, corrected snapshots invalidate prior choices, and invalid corrections
+withdraw obsolete anchors. Play timestamps require an explicit timezone and a
+valid calendar date. Calibration resets on event, feed or timing-source changes.
+
+Production schedule/play access, actual browser/HLS/TV validation, account
+entitlement/usage and successful-path platform CPU remain open release gates in
+`BACKLOG.md`. The frontend is not published merely because the build passes.
+The separate temporary player on port 8767 is unchanged.

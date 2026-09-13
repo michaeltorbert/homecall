@@ -8,10 +8,15 @@ export const schoolKey = value => {
   const key = String(value).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   return key === 'southernmississippi' ? 'southernmiss' : key;
 };
-export function matchEvent(events, school, game) {
+export function footballSeason(start) {
+  const date = new Date(start);
+  return date.getUTCFullYear() - (date.getUTCMonth() === 0 ? 1 : 0);
+}
+export function matchEvent(events, school, game, providerId) {
   if (!Number.isFinite(game.start)) return null;
   const wanted = [schoolKey(school), schoolKey(game.opponent)].sort().join('|');
-  const matches = events.filter(e => e.teams.map(schoolKey).sort().join('|') === wanted && Math.abs(e.start - game.start) < 24 * 60 * 60 * 1000);
+  const matches = events.filter(e => e.season === footballSeason(game.start) &&
+    (!providerId || e.teamIds?.includes(providerId)) && Array.isArray(e.teams) && e.teams.map(schoolKey).sort().join('|') === wanted && Math.abs(e.start - game.start) < 24 * 60 * 60 * 1000);
   return matches.length === 1 ? matches[0] : null;
 }
 export const playLabel = p => `${p.quarter > 4 ? 'OT' + (p.quarter - 4) : 'Q' + p.quarter} ${p.clock}`;

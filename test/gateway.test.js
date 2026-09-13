@@ -8,8 +8,8 @@ import { createTimingFreshness, nextPollDelay } from '../src/timing-freshness.js
 import { spawnSync } from 'node:child_process';
 const uuid = '410422f0-663f-4e3d-82e2-787d954ae29d';
 const upstream = url => {
-  if (url.includes('/summary?')) return {header:{},drives:{previous:[],current:{plays:[]}}};
-  if (url.includes('/schedule?')) return {events:[]};
+  if (url.includes('/summary?')) return {header:{id:new URL(url).searchParams.get('event'),uid:`s:20~l:23~e:${new URL(url).searchParams.get('event')}`,league:{id:'23',slug:'college-football'},season:{year:2026},competitions:[{id:new URL(url).searchParams.get('event'),competitors:[{team:{id:'150'}},{team:{id:'356'}}]}]},drives:{previous:[],current:{plays:[]}}};
+  if (url.includes('/schedule?')) return {team:{id:'150'},season:{year:2026},events:[]};
   if (url.includes('/games/')) return {success:true,games:[]};
   if (url.includes('espn.com')) return {sports:[{leagues:[{teams:[{team:{id:'150',location:'Duke'}}]}]}]};
   return {success:true,teams:[{team_id:uuid,school_name:'Georgia Tech'}]};
@@ -24,7 +24,7 @@ test('shared router serves exactly five minimized route families and timing age 
     assert.equal(response.status,200);
     assert.equal(response.headers.get('Cache-Control'),'no-store');
     const data = await response.json();
-    if (target.includes('/plays/')) { assert.equal(data.checkedAt,100000); assert.equal(data.ageMs,2); }
+    if (target.includes('/plays/')) { assert.ok(data.checkedAt >= 100000); assert.equal(data.ageMs,null); assert.equal(data.schemaVersion,2); assert.equal(data.eventId,'401856671'); }
     else assert.ok(Array.isArray(data));
   }
 });
@@ -47,27 +47,27 @@ test('CORS exact origins and restricted preflight are checked without credential
     calls++; assert.equal(init.credentials,'omit'); assert.equal(init.cache,'no-store'); assert.equal(init.redirect,'manual');
     assert.deepEqual(init.headers,{Accept:'application/json'});return fetcher(url);
   }};
-  for (const origin of ['null','https://michaeltorbert.github.io.evil.test','https://evil.test','']) assert.equal((await metadataGateway(makeRequest('/api/sync/teams',{headers:{Origin:origin}}),options)).status,403);
+  for (const origin of ['null','https://michaeltorbert.github.io.evil.test','https://evil.test','']) assert.equal((await metadataGateway(makeRequest('/api/sync/schedule/150/2026',{headers:{Origin:origin}}),options)).status,403);
   assert.equal(calls,0);
   const headers={Origin:PRODUCTION_ORIGIN,Authorization:'Bearer private',Cookie:'private=1'};
-  const response=await metadataGateway(makeRequest('/api/sync/teams',{headers}),options);
+  const response=await metadataGateway(makeRequest('/api/sync/schedule/150/2026',{headers}),options);
   assert.equal(response.headers.get('Access-Control-Allow-Origin'),PRODUCTION_ORIGIN);
   assert.equal(response.headers.get('Access-Control-Allow-Credentials'),null);assert.equal(calls,1);
-  assert.equal((await metadataGateway(makeRequest('/api/sync/teams'),options)).headers.get('Access-Control-Allow-Origin'),null);
-  assert.equal((await metadataGateway(makeRequest('/api/sync/teams',{method:'OPTIONS',headers:{Origin:PRODUCTION_ORIGIN,'Access-Control-Request-Method':'GET'}}),options)).status,204);
-  for (const extra of [{'Access-Control-Request-Method':'POST'},{'Access-Control-Request-Method':'GET','Access-Control-Request-Headers':'Authorization'}]) assert.equal((await metadataGateway(makeRequest('/api/sync/teams',{method:'OPTIONS',headers:{Origin:PRODUCTION_ORIGIN,...extra}}),options)).status,403);
+  assert.equal((await metadataGateway(makeRequest('/api/sync/schedule/150/2026'),options)).headers.get('Access-Control-Allow-Origin'),null);
+  assert.equal((await metadataGateway(makeRequest('/api/sync/schedule/150/2026',{method:'OPTIONS',headers:{Origin:PRODUCTION_ORIGIN,'Access-Control-Request-Method':'GET'}}),options)).status,204);
+  for (const extra of [{'Access-Control-Request-Method':'POST'},{'Access-Control-Request-Method':'GET','Access-Control-Request-Headers':'Authorization'}]) assert.equal((await metadataGateway(makeRequest('/api/sync/schedule/150/2026',{method:'OPTIONS',headers:{Origin:PRODUCTION_ORIGIN,...extra}}),options)).status,403);
   assert.equal(calls,2);
 });
 test('optional cache preserves original check time, recomputes age and CORS, and never serves expired data after failure',async()=>{
   let now=100000,calls=0,stored; const pending=[];
-  const cache={match:async()=>stored?.clone(),put:async(key,response)=>{stored=response;}};
-  const options={cache,ctx:{waitUntil:p=>pending.push(p)},now:()=>now,fetcher:async url=>{calls++;return fetcher(url);}};
+  const cache={match:async()=>stored?.clone(),put:async(key,response)=>{assert.match(key.url,/__metadata_cache_v2/);stored=response;}};
+  const options={cache,ctx:{waitUntil:p=>pending.push(p)},now:()=>now,fetcher:async url=>{calls++;return Response.json(upstream(String(url)),{headers:{Date:new Date(now-2000).toUTCString(),Age:'3'}});}};
   const first=await metadataGateway(makeRequest('/api/sync/plays/1',{headers:{Origin:PRODUCTION_ORIGIN}}),options);
-  assert.equal((await first.json()).ageMs,0);await Promise.all(pending);
+  assert.equal((await first.json()).ageMs,4000);await Promise.all(pending);
   assert.equal(stored.headers.get('Access-Control-Allow-Origin'),null);
   now+=5000;
   const hit=await metadataGateway(makeRequest('/api/sync/plays/1'),options);const data=await hit.json();
-  assert.equal(data.checkedAt,100000);assert.equal(data.ageMs,5000);assert.equal(calls,1);assert.equal(hit.headers.get('Access-Control-Allow-Origin'),null);
+  assert.equal(data.checkedAt,100000);assert.equal(data.ageMs,9000);assert.equal(calls,1);assert.equal(hit.headers.get('Access-Control-Allow-Origin'),null);
   now+=5000;
   const failure=await metadataGateway(makeRequest('/api/sync/plays/1'),{...options,fetcher:async()=>{throw Error();}});
   assert.equal(failure.status,502);
@@ -81,7 +81,7 @@ test('backend JSON bounds decoded bytes, cancels streams, rejects HTML/schema/re
   await assert.rejects(readBackendJSON('https://upstream.test',{fetcher:async()=>new Response(stream,{headers:{'Content-Type':'application/json'}}),maxBytes:5}),/too-large/);
   assert.equal(cancelled,true);
   for (const response of [new Response('<html>error</html>',{headers:{'Content-Type':'text/html'}}),new Response('{broken',{headers:{'Content-Type':'application/json'}}),Response.redirect('https://other.test')]) await assert.rejects(readBackendJSON('https://upstream.test',{fetcher:async()=>response}));
-  assert.equal((await metadataGateway(makeRequest('/api/sync/teams'),{fetcher:async()=>Response.json({html:'not teams'})})).status,502);
+  assert.equal((await metadataGateway(makeRequest('/api/sync/schedule/150/2026'),{fetcher:async()=>Response.json({html:'not schedule'})})).status,502);
   await assert.rejects(readBackendJSON('https://upstream.test',{fetcher:async()=>{throw TypeError('redirect rejected');}}),/redirect rejected/);
   const chunks=['{"name":"','é','"}'].map(s=>new TextEncoder().encode(s));
   assert.deepEqual(await readBackendJSON('https://upstream.test',{fetcher:async()=>new Response(new ReadableStream({start(c){for(const chunk of chunks)c.enqueue(chunk);c.close();}}),{headers:{'Content-Type':'application/json'}})}),{name:'é'});
@@ -117,16 +117,24 @@ test('publishing config fails before archive network work for missing or invalid
 });
 test('freshness counts server age, request time and elapsed time without comparing remote clocks',()=>{
   let wall=10000,mono=100;const clock=()=>({wall,mono});const f=createTimingFreshness({clock});
-  const start=f.start();wall+=2000;mono+=2000;f.receive({checkedAt:999999999,ageMs:5000},start);
+  const start=f.start();wall+=2000;mono+=2000;f.receive({schemaVersion:2,checkedAt:999999999,ageMs:5000},start);
   assert.equal(f.fresh(),true);wall+=37999;mono+=37999;assert.equal(f.fresh(),true);wall++;mono++;assert.equal(f.fresh(),false);
-  for (const data of [{checkedAt:1},{checkedAt:1,ageMs:-1},{checkedAt:1,ageMs:Infinity},{ageMs:0},{checkedAt:1,ageMs:1.5}]) {f.receive(data,f.start());assert.equal(f.fresh(),false);}
-  f.receive({checkedAt:1,ageMs:0},f.start());wall+=500;mono+=500;assert.equal(f.fresh(),true);wall-=1;mono+=1;assert.equal(f.fresh(),false);
-  f.receive({checkedAt:1,ageMs:0},f.start());wall+=2000;assert.equal(f.fresh(),false);
-  f.receive({checkedAt:1,ageMs:0},f.start());f.invalidate();assert.equal(f.fresh(),false);
+  for (const data of [{checkedAt:1},{checkedAt:1,ageMs:-1},{checkedAt:1,ageMs:Infinity},{ageMs:0},{checkedAt:1,ageMs:1.5}]) {f.receive({schemaVersion:2,...data},f.start());assert.equal(f.fresh(),false);}
+  f.receive({schemaVersion:2,checkedAt:1,ageMs:0},f.start());wall+=500;mono+=500;assert.equal(f.fresh(),true);wall-=1;mono+=1;assert.equal(f.fresh(),false);
+  f.receive({schemaVersion:2,checkedAt:1,ageMs:0},f.start());wall+=2000;assert.equal(f.fresh(),false);
+  f.receive({schemaVersion:2,checkedAt:1,ageMs:0},f.start());f.invalidate();assert.equal(f.fresh(),false);
   assert.deepEqual([nextPollDelay(15000,false),nextPollDelay(30000,false),nextPollDelay(60000,false),nextPollDelay(120000,false),nextPollDelay(120000,true)],[30000,60000,120000,120000,15000]);
 });
 test('shared gateway distinguishes the full upstream deadline from invalid provider data',async()=>{
  const timeout=new DOMException('Deadline','TimeoutError');
- assert.equal((await metadataGateway(makeRequest('/api/sync/teams'),{fetcher:async()=>{throw timeout;}})).status,504);
- assert.equal((await metadataGateway(makeRequest('/api/sync/teams'),{fetcher:async()=>Response.json({})})).status,502);
+ assert.equal((await metadataGateway(makeRequest('/api/sync/schedule/150/2026'),{fetcher:async()=>{throw timeout;}})).status,504);
+ assert.equal((await metadataGateway(makeRequest('/api/sync/schedule/150/2026'),{fetcher:async()=>Response.json({})})).status,502);
+});
+test('cached timing with unknown upstream age never becomes fresh on cache delivery',async()=>{
+ let wall=100000,stored;const pending=[];
+ const options={now:()=>wall,fetcher,cache:{match:async()=>stored?.clone(),put:async(key,response)=>{assert.match(key.url,/__metadata_cache_v2/);stored=response;}},ctx:{waitUntil:p=>pending.push(p)}};
+ const first=await metadataGateway(makeRequest('/api/sync/plays/1'),options);
+ assert.equal((await first.json()).ageMs,null);await Promise.all(pending);wall+=5000;
+ const hit=await metadataGateway(makeRequest('/api/sync/plays/1'),{...options,fetcher:async()=>{throw Error('cache should avoid upstream');}});
+ assert.equal(hit.status,200);assert.equal((await hit.json()).ageMs,null);
 });
