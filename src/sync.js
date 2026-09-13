@@ -1,3 +1,5 @@
+import { createTimingFreshness, nextPollDelay } from './timing-freshness.js';
+import { metadataURL } from './gateway.js';
 import { readJSON } from './homestream.js';
 import { setupHomestream } from './homestream-ui.js';
 import { SyncPlayer } from './sync-player.js';
@@ -5,13 +7,14 @@ import { schoolKey, matchEvent, availableAnchors, selectAnchors, gameOrder, play
 export function setupSync({ initialSchool = () => 'Duke' } = {}) {
   const $ = id => document.getElementById(`sync-${id}`);
   const audio = $('audio'), player = new SyncPlayer(audio, text => { $('playback').textContent = text; });
-  let active = false, teamsController, mappingController, pollTimer, plays = [], conflict = false, checkedAt = 0, calibrationKey = null;
-  const api = path => new URL(`api/${path}`, document.baseURI);
+  let active = false, teamsController, mappingController, pollTimer, plays = [], conflict = false, calibrationKey = null;
+  const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
+  const freshness = createTimingFreshness();
   const school = () => $('team').selectedOptions[0]?.textContent || initialSchool();
   const offset = () => { const n = Number($('offset').value); return Number.isFinite(n) ? n : 0; };
   function clearMapping() {
     mappingController?.abort(); mappingController = null; clearTimeout(pollTimer);
-    plays = []; checkedAt = 0; conflict = false; $('matches').replaceChildren();
+    plays = []; freshness.invalidate(); conflict = false; $('matches').replaceChildren();
     $('mapping-note').textContent = 'Waiting for game timing data.';
   }
   function reset() {
@@ -19,7 +22,9 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
     $('result').textContent = ''; render();
   }
   async function loadMapping(game) {
-    clearMapping(); const controller = mappingController = new AbortController(), signal = controller.signal;
+    clearMapping();
+    if (document.visibilityState === 'hidden') return;
+    const controller = mappingController = new AbortController(), signal = controller.signal;
     $('mapping-note').textContent = 'Finding matching game timing…';
     try {
       const espnTeams = await readJSON(api('sync/teams'), {signal});
@@ -30,14 +35,18 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
       if (signal.aborted) return;
       const event = matchEvent(schedule, school(), game);
       if (!event) throw Error();
+      let pollDelay = 15000;
       async function poll() {
+        const started = freshness.start();
+        let success = false;
         try {
           const data = await readJSON(api(`sync/plays/${event.id}`), {signal});
           if (signal.aborted) return;
-          plays = data.plays; conflict = data.conflict; checkedAt = Date.now();
+          if (!Array.isArray(data.plays) || typeof data.conflict !== 'boolean') throw Error('timing-invalid');
+          plays = data.plays; conflict = data.conflict; freshness.receive(data, started); success = true;
           $('mapping-note').textContent = conflict ? 'Estimated only: some sports-data timestamps are out of order. Confirm against the commentary.' : 'Estimated play anchors; a stopped game clock can match more than one play.';
-        } catch { if (!signal.aborted) $('mapping-note').textContent = 'Game timing refresh failed. Older anchors are shown; clock seeking pauses when data is stale.'; }
-        if (!signal.aborted) { render(); pollTimer = setTimeout(poll,15000); }
+        } catch { if (!signal.aborted) $('mapping-note').textContent = 'Game timing is unavailable or the service limit was reached. Retrying less often; older anchors expire and manual audio controls still work.'; }
+        if (!signal.aborted) { render(); if (success) pollDelay = 15000; pollTimer = setTimeout(poll,pollDelay); pollDelay = nextPollDelay(pollDelay, success); }
       }
       await poll();
     } catch {
@@ -52,7 +61,7 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
     render();
   }});
   function render() {
-    const timing = player.timing(), fresh = checkedAt > 0 && Date.now()-checkedAt < 45000;
+    const timing = player.timing(), fresh = freshness.fresh();
     const anchors = availableAnchors(plays,timing,offset()).sort(gameOrder);
     $('play').disabled = !catalog.ready;
     $('stop').disabled = !player.active;
@@ -79,7 +88,7 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
       if (preferred) $('team').value = preferred.id;
       $('team-note').textContent = teams.length ? 'Choose a school and game. Feeds are checked before playback.' : 'No schools are currently listed.';
       if (teams.length) catalog.setEnabled(true);
-    } catch { if (!signal.aborted) $('team-note').textContent = 'Schools could not load. Retry when the local catalog service is available.'; }
+    } catch { if (!signal.aborted) $('team-note').textContent = 'Schools could not load. Retry when the catalog service is available.'; }
     finally { if (!signal.aborted) { $('team').disabled = !$('team').options.length; $('teams-retry').disabled = false; } }
   }
   $('team').onchange = () => { $('offset').value = '0'; catalog.setEnabled(true); };
@@ -98,14 +107,14 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
   function applyAnchor(anchor) {
     // Recalculate against the current audio position/window, never a captured button position.
     const current = availableAnchors(plays,player.timing(),offset()).find(p => p.id === anchor.id);
-    if (!checkedAt || Date.now()-checkedAt >= 45000 || !current || !player.seek(current.position)) {
+    if (!freshness.fresh() || !current || !player.seek(current.position)) {
       $('result').textContent = 'That play is no longer available. Check the range and try again.'; return;
     }
     $('result').textContent = `Moved to ${playLabel(current)} — estimated alignment. Press Play if paused, then compare with your TV.`;
   }
   $('clock-form').onsubmit = event => {
     event.preventDefault(); $('matches').replaceChildren();
-    if (!checkedAt || Date.now()-checkedAt >= 45000) { $('result').textContent = 'Wait for fresh game timing data.'; return; }
+    if (!freshness.fresh()) { $('result').textContent = 'Wait for fresh game timing data.'; return; }
     const result = selectAnchors(availableAnchors(plays,player.timing(),offset()),Number($('quarter').value),$('clock').value);
     if (result.status !== 'ready') { $('result').textContent = result.status === 'invalid' ? 'Enter a clock from 0:00 to 15:00, such as 7:29.' : 'That clock is outside the available game-time anchors. Playback has not moved.'; return; }
     if (result.matches.length === 1) { applyAnchor(result.matches[0]); if (result.distance) $('result').textContent += ` Nearest recorded play is ${result.distance} game-clock seconds away.`; }
@@ -116,6 +125,13 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
     render();
   };
   $('offset').oninput = () => { $('matches').replaceChildren(); render(); };
+  document.addEventListener('visibilitychange', () => {
+    freshness.invalidate();
+    if (!active) return;
+    clearMapping();
+    if (document.visibilityState === 'visible' && catalog.ready) void loadMapping(catalog.ready);
+    render();
+  });
   setInterval(() => { if (active) render(); },1000);
   return {
     activate() { active = true; reset(); loadTeams(); },

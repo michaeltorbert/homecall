@@ -29,7 +29,7 @@ test('canceling a playlist check cannot yield a ready obsolete source',async()=>
  await assert.rejects(checkPlaylist(url,{signal:c.signal,fetcher:async()=>({ok:true,text:async()=>manifest()}),sleep:async()=>{c.abort();throw c.signal.reason;}}),{name:'AbortError'});
 });
 test('gateway permits only fixed anonymous catalog routes and returns minimized data',async()=>{
- const requests=[];const fetcher=async(u,o)=>{requests.push({u,o});return{ok:true,json:async()=>({success:true,games:[{...game,secret:'excluded'}]})};};
+ const requests=[];const fetcher=async(u,o)=>{requests.push({u,o});return Response.json({success:true,games:[{...game,secret:'excluded'}]});};
  const data=await homestreamCatalog('/api/homestream/games/'+team,{fetcher});assert.equal(data[0].url,url);assert.equal(data[0].secret,undefined);
  assert.equal(requests[0].o.credentials,'omit');assert.ok(requests[0].u.endsWith('?game_type=football'));
  assert.equal(await homestreamCatalog('/api/homestream/games/https://evil.test',{fetcher}),null);

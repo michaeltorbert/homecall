@@ -50,3 +50,12 @@ test('verified Southern Mississippi alias matches Auburn without fuzzy opponent 
  assert.equal(matchEvent([event],'Auburn',{start:base,opponent:'Southern Mississippi'}),event);
  assert.equal(matchEvent([event],'Auburn',{start:base,opponent:'Mississippi'}),null);
 });
+
+test('play ordering preserves numeric collation, leading-zero ties, large integers and mixed text IDs',()=>{
+ const ids=['a10','10','02','9007199254740993','2','a2','001','9007199254740992','1','9'];
+ const expected=['001','1','02','2','9','10','9007199254740992','9007199254740993','a2','a10'];
+ const plays=ids.map(id=>({id,wallclock:new Date(base+expected.indexOf(id)*1000).toISOString(),period:{number:1},clock:{displayValue:'5:08'}}));
+ const data=normalizePlays({header:{},drives:{previous:[{plays}]}},base);
+ assert.deepEqual(data.plays.map(play=>play.id),expected);
+ assert.equal(data.conflict,false);
+});

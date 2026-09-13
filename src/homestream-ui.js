@@ -1,3 +1,4 @@
+import { metadataURL } from './gateway.js';
 import { readJSON, checkPlaylist } from './homestream.js';
 const messages = {
   unpublished: 'This game’s feed has not been published. Refresh closer to the broadcast.',
@@ -8,6 +9,7 @@ const messages = {
   ready: 'Live playlist confirmed. Press Play, then match the audio to your TV.'
 };
 export function setupHomestream({ onChange, onReady, read = readJSON, probe = checkPlaylist, prefix = '', school = () => 'Georgia Tech' }) {
+  const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
   const $ = id => document.getElementById(prefix + id);
   let controller, games = [], ready = null, enabled = false;
   const cancel = () => { controller?.abort(); controller = null; ready = null; };
@@ -27,11 +29,11 @@ export function setupHomestream({ onChange, onReady, read = readJSON, probe = ch
     $('game').disabled = true; $('game-refresh').disabled = true;
     $('game-note').textContent = `Loading ${school()} games…`;
     try {
-      const list = await read(new URL('api/homestream/teams', document.baseURI), { signal });
+      const list = await read(api('homestream/teams'), { signal });
       if (signal.aborted) return;
       const team = list.find(t => t.name.toLowerCase() === school().toLowerCase());
       if (!team) throw Error('team-unavailable');
-      const loaded = await read(new URL(`api/homestream/games/${encodeURIComponent(team.id)}`, document.baseURI), { signal });
+      const loaded = await read(api(`homestream/games/${encodeURIComponent(team.id)}`), { signal });
       if (signal.aborted) return;
       games = loaded;
       const current = games.find(g => g.id === previous) || [...games].filter(g => g.start !== null).sort((a,b) => Math.abs(a.start-Date.now())-Math.abs(b.start-Date.now()))[0] || games[0];

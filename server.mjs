@@ -1,6 +1,5 @@
 import http from 'node:http';
-import { syncData } from './lib/sync-data.mjs';
-import { homestreamCatalog } from './lib/homestream-catalog.mjs';
+import { metadataGateway, PRODUCTION_ORIGIN, LOCAL_ORIGINS } from './lib/metadata-gateway.mjs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -10,13 +9,10 @@ const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.was
 let cached;
 const server=http.createServer(async(req,res)=>{
   if (req.url.startsWith('/api/homestream/') || req.url.startsWith('/api/sync/')) {
-    if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
-    res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store');
-    try {
-      const result = await (req.url.startsWith('/api/sync/') ? syncData(req.url) : homestreamCatalog(req.url));
-      res.statusCode = result === null ? 404 : 200;
-      res.end(JSON.stringify(result ?? { error: 'Unknown catalog route' }));
-    } catch { res.statusCode = 502; res.end(JSON.stringify({ error: 'Catalog unavailable' })); }
+    const request = new Request(new URL(req.url, 'http://127.0.0.1'), { headers: req.headers });
+    const response = await metadataGateway(request, { target: req.url, method: req.method, origins: [PRODUCTION_ORIGIN, ...LOCAL_ORIGINS] });
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    res.end(await response.text());
     return;
   }
   if (req.url==='/api/duke') {
@@ -38,5 +34,5 @@ const server=http.createServer(async(req,res)=>{
   } catch {res.writeHead(404);res.end('Build the app with npm run build before starting it.');}
 });
 const port = Number(process.env.PORT || 4178);
-server.listen(port,'127.0.0.1',()=>console.log(`Homecall: http://127.0.0.1:${port}`));
+server.listen(port,'127.0.0.1',()=>console.log(`Homecall: http://127.0.0.1:${server.address().port}`));
 for(const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>{server.close();process.exit(0);});
