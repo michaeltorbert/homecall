@@ -1,6 +1,7 @@
+import { metadataURL, configuredGatewayOrigin, gatewayOptions } from './gateway.js';
 import { teams } from './teams.js';
 import { filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
-export function setupArchive({ stopLive, selectedTeam, memory, sync = null }) {
+export function setupArchive({ stopLive, selectedTeam, memory, sync = null, origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
   let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
@@ -59,7 +60,8 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null }) {
     }
     const items = filterReplays(source?.items || [], $('archive-sport').value, $('archive-year').value);
     $('archive-list').replaceChildren();
-    $('archive-note').textContent = !catalog ? (catalogError ? 'The archive catalog could not load. Try again or visit the official site.' : 'Loading recordings…') : source?.status === 'unavailable' ? `We couldn’t refresh ${team.name}’s archive. Try the official site below.` : source?.status === 'external' ? `In-app recordings aren’t available for ${team.name} yet. Visit the official site for listening options.` : `${items.length} recordings · Catalog checked ${new Date(catalog.checkedAt).toLocaleString()}. Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`;
+    $('archive-note').textContent = !catalog ? (catalogError ? 'The archive catalog could not load. Try again or visit the official site.' : 'Loading recordings…') : source?.status === 'unavailable' ? `We couldn’t refresh ${team.name}’s archive. Try the official site below.` : source?.status === 'external' ? `In-app recordings aren’t available for ${team.name} yet. Visit the official site for listening options.` : `${items.length} recordings · Catalog checked ${new Date(source?.checkedAt || catalog.checkedAt).toLocaleString()}. Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`;
+    if (source?.status === 'stale') $('archive-note').textContent = `Showing previously checked recordings. The latest refresh failed. Last checked ${new Date(source.checkedAt || catalog.checkedAt).toLocaleString()}.`;
     if (source?.status === 'ready' && !items.length) $('archive-note').textContent = 'No recordings match these filters. Try another sport or year.';
     for (const item of items) {
       const li = document.createElement('li'), button = document.createElement('button');
@@ -132,9 +134,9 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null }) {
     const mine = ++loadGeneration;
     $('archive-retry').disabled = true;
     try {
-      const response = await fetch('./archive.json', { cache: 'no-cache', signal: AbortSignal.timeout(15000) });
+      const response = await fetch(metadataURL('catalog/archive', document.baseURI, origin, { allowLocal, required: true }), { credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw Error();
-      const data = validateCatalog(await response.json());
+      const data = validateCatalog(await response.json(), { origin, allowLocal });
       if (mine !== loadGeneration) return;
       catalog = data; catalogError = false; render();
     } catch { if (mine === loadGeneration) { catalogError = true; $('archive-note').textContent = 'The archive catalog could not load. Try again or visit the official site.'; } }

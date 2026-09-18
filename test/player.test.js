@@ -157,3 +157,61 @@ test('fatal HLS startup error closes the transport and stale transport callbacks
  callback(null,{fatal:true});h.contexts[0].module.resolve();await rejected;assert.equal(h.transports[0].destroyed,true);
  const count=h.events.length;callback(null,{fatal:true});assert.equal(h.events.length,count);
 });
+
+function recoveryHarness(options={}) {
+ const timers=[];
+ const h=harness({...options,setTimeout:(fn,ms)=>{const timer={fn,ms};timers.push(timer);return timer;},clearTimeout:timer=>{if(timer)timer.cleared=true;}});
+ return {...h,timers,nextRetry:()=>timers.find(t=>!t.cleared&&!t.fired&&[1000,2000,4000].includes(t.ms))};
+}
+test('unexpected EOF reloads the same root, discards PCM and restores numerical delay before ingestion',async()=>{
+ const h=recoveryHarness();await connect(h);const oldNode=h.nodes[0],oldContext=h.contexts[0];
+ h.player.state={delay:35,resumeDelay:35,paused:false};h.audios[0].onended();
+ assert.equal(oldContext.closed,true);assert.equal(h.player.node,null);assert.equal(h.events.at(-1),'source-reconnecting');
+ const timer=h.nextRetry();assert.equal(timer.ms,1000);timer.fired=true;const retry=timer.fn();
+ assert.equal(h.audios[1].src,'https://fixture/stream');h.audios[1].onplaying();h.audios[1].played.resolve();h.contexts[1].module.resolve();await tick();
+ const node=h.nodes[1];assert.notEqual(node,oldNode);assert.equal(node.messages[0].type,'restore');assert.equal(node.messages[0].value,35);
+ node.ack(0);await tick();assert.equal(node.messages[1].type,'ingest');node.ack(1);await retry;
+ assert.equal(h.events.at(-1),'source-reconnected');h.player.stop();
+});
+test('stop or a source switch cancels queued reconnect without surprise playback',async()=>{
+ const h=recoveryHarness();await connect(h);h.audios[0].onerror();const timer=h.nextRetry();h.player.stop();
+ assert.equal(timer.cleared,true);await timer.fn();assert.equal(h.audios.length,1);
+});
+test('automatic reconnect has a three-attempt budget and leaves a manual recovery message',async()=>{
+ const h=recoveryHarness();await connect(h);h.audios[0].onerror();
+ for(const wait of [1000,2000,4000]){
+  const timer=h.nextRetry();assert.equal(timer.ms,wait);timer.fired=true;const attempt=timer.fn();
+  h.audios.at(-1).played.reject(Error('offline'));h.contexts.at(-1).module.resolve();await attempt;
+ }
+ assert.equal(h.nextRetry(),undefined);assert.equal(h.audios.length,4);assert.equal(h.events.at(-1),'source-reconnect-exhausted');assert.equal(h.states.at(-1),null);
+});
+test('a phone gesture restriction ends automatic attempts and requests Play',async()=>{
+ const h=recoveryHarness();await connect(h);h.audios[0].onerror();const timer=h.nextRetry();timer.fired=true;const attempt=timer.fn();
+ const error=Error('gesture required');error.name='NotAllowedError';h.audios.at(-1).played.reject(error);h.contexts.at(-1).module.resolve();await attempt;
+ assert.equal(h.events.at(-1),'source-reconnect-required');assert.equal(h.nextRetry(),undefined);
+});
+test('fatal HLS after connection reloads the original gateway root, not a descendant token',async()=>{
+ const h=recoveryHarness({hls:true});const root='https://gateway.example/media/game/team/one';const first=h.player.start(root,0,{hls:true});
+ h.audios[0].onplaying();h.audios[0].played.resolve();h.contexts[0].module.resolve();await tick();h.nodes[0].ack();await first;
+ h.transports[0].handlers.error(null,{fatal:true});const timer=h.nextRetry();timer.fired=true;const attempt=timer.fn();
+ assert.equal(h.transports[1].url,root);assert.equal(h.transports[0].destroyed,true);
+ h.audios[1].onplaying();h.audios[1].played.resolve();h.contexts[1].module.resolve();await tick();h.nodes[1].ack();await attempt;h.player.stop();
+});
+
+test('a sustained post-connect stall has one watchdog and short buffering cancels it',async()=>{
+ const h=recoveryHarness();await connect(h);const audio=h.audios[0];
+ audio.onwaiting();const timer=h.timers.find(t=>!t.cleared&&t.ms===20000);assert.ok(timer);
+ audio.onwaiting();assert.equal(h.timers.filter(t=>!t.cleared&&t.ms===20000).length,1);
+ audio.onplaying();assert.equal(timer.cleared,true);assert.equal(h.nextRetry(),undefined);
+ audio.readyState=2;audio.onstalled();const sustained=h.timers.find(t=>!t.cleared&&t.ms===20000);sustained.fn();assert.equal(h.nextRetry().ms,1000);h.player.stop();
+});
+test('stall watchdog cannot restart a deliberate hold, native pause, or stopped source',async()=>{
+ for(const action of ['hold','pause','stop']){
+  const h=recoveryHarness();await connect(h);h.audios[0].onwaiting();const timer=h.timers.find(t=>!t.cleared&&t.ms===20000);
+  if(action==='hold')h.player.state={holding:true,paused:true};
+  if(action==='pause')h.audios[0].onpause();
+  if(action==='stop')h.player.stop();
+  if(action!=='pause')timer.fn();else assert.equal(timer.cleared,true);
+  assert.equal(h.nextRetry(),undefined);h.player.stop();
+ }
+});

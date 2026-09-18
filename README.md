@@ -15,7 +15,7 @@ Pause keeps collecting audio for up to three minutes. A buffer overrun cancels a
 
 For Duke, use **Audio feed** above Play to choose the network's backup connection or WSJS, WCCG, or WTIB. Changing the feed stops playback. Press Play to start the new feed with a fresh buffer and zero added delay, then check alignment. Reconnecting the same feed restores its own saved delay. Switching teams returns to that team's primary feed; feed selection itself is not saved across reloads.
 
-The network backup is the `img.leanstream.co/IM3501-MP3` address published by [Varsity's Duke player](https://thevarsitynetwork.com/feed/source/oas-1693); it shares the primary's broadcast provider. The three stations are listed among [Duke's affiliates](https://goduke.com/sports/2022/8/6/local-radio-affiliates) and carried postgame interview audio in September 12, 2026 samples. Their programming and availability can change, so the app never automatically switches stations or promises that a game is currently on. WKRX carried postgame during direct sample checks but failed the in-app connection check, so it is not included. The official-player link follows the selected feed, and logs identify that feed without recording its URL.
+The network backup is the private alternate address published by [Varsity's Duke player](https://thevarsitynetwork.com/feed/source/oas-1693); it shares the primary's broadcast provider. The three stations are listed among [Duke's affiliates](https://goduke.com/sports/2022/8/6/local-radio-affiliates) and carried postgame interview audio in September 12, 2026 samples. Their programming and availability can change, so the app never automatically switches stations or promises that a game is currently on. WKRX carried postgame during direct sample checks but failed the in-app connection check, so it is not included. The official-player link follows the selected feed, and logs identify that feed without recording its URL.
 
 ## Send a test log from a phone
 
@@ -64,13 +64,7 @@ The manual plan received available-seat agreement from Codex, Claude, Grok and G
 
 Choose Archive, then a school, sport, and year. Native audio controls provide play/pause and a seekable timeline, with playback speed and fine position adjustments. Pause at a distinctive play, then resume when it appears in a TV replay. Switching school or leaving Archive stops the recording; opening Archive disconnects live audio. No scores are imported; provider titles may contain spoilers. Game recordings are not guaranteed to contain the complete game.
 
-The build fetches official Duke and Virginia Tech catalog metadata into ignored `public/archive.json`; no recordings are downloaded or hosted. Pages refreshes on deployment and every six hours. Source failures are isolated per school and shown as unavailable, with an official link. Refresh list reloads the published catalog, whose check time is shown. An unavailable source needs a later successful deployment refresh. Miami has no verified in-app archive feed. Local build requires network access for fresh listings; an offline build shows unavailable sources. Archive playback does not use or produce live-sync test logs.
-
-### Archive source provenance
-
-Verified September 10, 2026: the official Virginia Tech Sports Network page publishes `leanstream_college_id=9004` and `leanstreamProxyBaseUrl`; its linked `/_nuxt/DOLbHSEw.js` requests `?id=9004&archive=true` from `https://us-central1-lyrical-amulet-150218.cloudfunctions.net/wmt-leanstream-proxy-v2/`. This is the official page's configured service, not a Homecall-operated proxy. Hosts/paths may change; failures remain explicit rather than substituting an unverified feed. Duke's player similarly publishes the signed previous-events XML address discovered at build time. Strict recording URL validation may exclude unsupported filename formats.
-
-Refresh list reloads the published catalog while preserving the current replay and filters. The six-hour cadence depends on GitHub Actions scheduling; the displayed check time is authoritative, and a manual workflow dispatch can refresh a stale deployment. Existing `mystream.*` browser storage keys remain for saved preferences/log compatibility.
+Archive listings come from the gateway's private catalog. The Worker refreshes sources every six hours when its single publisher is enabled. Failed refreshes preserve the last good recordings and their original check time, marked stale. Successful empty listings replace old entries. Refresh list reloads that catalog without rebuilding the site. Builds perform no provider discovery and contain no recording addresses. Miami links to its official listening site.
 
 ## Remembering playback
 
@@ -83,7 +77,7 @@ Resume audio returns to the saved delay. If the TV was paused too, Resume where 
 Choose **Georgia Tech**, select a football game, and wait for the playlist check
 before pressing Play. The app obtains the anonymous Homestream team list and
 football catalog, matches the returned team ID to the home/away side, and uses
-that side's exact published HTTPS CloudFront address. No dated game URL or
+a gateway address for that side's privately discovered feed. No dated game URL or
 account token is bundled. A published address is not proof of availability:
 missing URLs, 404 responses, ended playlists and non-advancing playlists have
 separate messages. Refresh games retries discovery.
@@ -95,22 +89,9 @@ Reconnect stops playback, refreshes the catalog and rechecks availability; press
 Play again when ready to restore the saved delay with a fresh buffer. Changing
 games stops the previous feed and cancels pending discovery.
 
-Run `npm run build` and `npm start` (or `PORT=4179 npm start`). The Node server
-provides GET-only `/api/homestream/teams` and `/api/homestream/games/<team-id>`
-routes against a fixed upstream host, returning only the fields needed by the
-selector. It does not proxy media or forward credentials. Requests have a
-bounded 8-second deadline covering the upstream fetch and body, and a 2 MiB
-decoded JSON limit. Browser metadata and playlist requests retain their
-10-second timeout. Playlist advancement is checked directly in the browser.
+The gateway owns provider discovery and media transport. The browser receives stable stream IDs and gateway URLs; it never receives upstream media addresses in catalog JSON or playlist references. Audio still reaches the listener, so this is address concealment rather than copy protection. Official attribution links remain public.
 
-**Deployment:** the public catalog lacks CORS headers. The repository now includes
-an optional Cloudflare Worker metadata gateway for the static Pages frontend;
-it is deployed at `https://homecall-metadata.homecall.workers.dev`. Homestream
-catalog routes work; the Worker timing routes remain denied by ESPN. Free
-entitlement and successful-path timing CPU remain unverified. See the setup and release gates below. Existing direct radio feeds
-and Archive remain available on static hosting. A catalog error does not
-silently fall back to a dated or unverified stream. This change does not add
-Georgia Tech recordings to Archive or claim automatic TV synchronization.
+See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for configuration, rollout gates and local development. This implementation has not replaced the production gateway until the separate rollout checks are satisfied. Provider availability and permitted relay use remain acceptance gates.
 
 ### Sync tab (experimental)
 
@@ -152,100 +133,9 @@ screen support is claimed. The metadata Worker must be deployed and configured b
 on static GitHub Pages. Local build and mock tests do not establish real browser
 playback or precise alignment.
 
-## Metadata Worker development and publishing
+## Gateway development and publishing
 
-The Worker serves only five anonymous GET route families: Homestream teams and
-football games, plus ESPN teams, schedules and plays. It does not relay audio,
-playlists, arbitrary URLs, incoming credentials or request headers. Exact routes
-reject queries and encoded variants. Upstream redirects are never followed:
-workerd rejects `redirect: 'error'`, so the shared reader uses `manual` and rejects
-all non-success responses, including every redirect. Invalid metadata returns
-502; the full upstream deadline returns 504. No stale fallback is served.
-
-`caches.default` is optional. Normalized team lists may be cached for 3,600 seconds,
-games for 15 seconds, schedules for 300 seconds and plays for 10 seconds. Cache
-errors act as misses; explicit check times prevent expired entries from extending
-freshness. Every plays response includes `ageMs` (a nonnegative age or `null` when unknown) recalculated at delivery
-and unchanged `checkedAt`; the other four responses remain arrays. Browser
-responses use `Cache-Control: no-store`; CORS is attached after cache lookup.
-The only production browser Origin allowed is `https://michaeltorbert.github.io`
-(Pages API verified September 12, 2026; no custom domain). Origin-less GET probes
-are allowed. CORS restricts browser access, not authentication or quota abuse.
-
-Local default builds use the existing same-origin Node routes. To exercise the
-Worker on loopback instead:
-
-```sh
-npm run worker:dev
-# In another terminal, build and start the frontend:
-VITE_GATEWAY_ORIGIN=http://127.0.0.1:8787 npm run build
-npm start
-```
-
-The local Worker permits exactly localhost/127.0.0.1 origins on ports 4178 and
-4179, separately from production. `VITE_GATEWAY_ORIGIN` is public build-time
-configuration consumed by both discovery interfaces. It must be a bare HTTPS
-origin; loopback HTTP is allowed only in local/non-publishing builds. Paths,
-trailing slashes, credentials, queries and fragments fail validation. Empty
-configuration is valid locally and for PR builds; invalid explicit configuration
-fails every build. `REQUIRE_GATEWAY=true` makes missing configuration fail before
-the archive network refresh. The existing Pages workflow sets this flag only on
-`main` publishing builds, including scheduled publishing, and reads repository
-variable `VITE_GATEWAY_ORIGIN`. There is no automatic Worker deployment workflow.
-
-```sh
-npm test
-npm run test:worker
-npm run worker:dry-run
-npm run worker:types
-npm run build
-```
-
-`test:worker` bundles the actual entrypoint and runs local workerd HTTP tests with
-fixture upstreams, including Cache API hits, per-delivery timing age, CORS,
-redirect rejection, body limits and cancellation. A September 12 real-provider
-probe through local workerd returned 200 for Homestream teams/games, but ESPN
-returned 403 HTML access-denied responses for all three route families; the
-gateway correctly returned unavailable (502). This blocks the Homecall-service timing source. The separate browser recorded-play
-source requires permitted browser acceptance before hosted Sync is released. No
-access-denial bypass or header impersonation was attempted. These checks do not prove
-platform CPU, deployed cache effectiveness, browser media CORS or audible output.
-Generated bundles, local runtime state and generated types are ignored. Wrangler
-and its local test runtime are pinned; the Worker itself needs no Node server,
-paid storage binding or secret.
-
-Publishing remains a separate authorized operation:
-
-1. Confirm the target Cloudflare account, Free entitlement and a workers.dev
-   subdomain or custom domain. The read-only September 12 account check found no
-   Workers or workers.dev subdomain; entitlement was not independently confirmed.
-   Account setup and deployment require approval; no paid upgrade is assumed.
-2. After approval, select the verified account (for example through
-   `CLOUDFLARE_ACCOUNT_ID`) and run `npm run worker:deploy`. Record the actual
-   returned HTTPS origin. Do not invent a hostname to make publishing pass.
-3. Before exposing the new frontend, verify deployed CORS and all upstream route
-   families, cold and cached platform CPU on late-game/max-supported samples,
-   deployed cache behavior and account-wide request usage. Re-serializing cached
-   plays counts toward CPU. The 2 MiB limit is an initial memory bound, not a CPU
-   guarantee; increasing cache TTL cannot fix an expensive cold invocation.
-4. Set the Pages repository variable to the verified origin, run the required
-   publishing build, then verify the deployed frontend and direct browser HLS in
-   an allowed browser. Browser security-check failures are not bypassed. All open
-   gates are recorded in `BACKLOG.md`.
-
-Successful 15-second polling alone uses about 240 Worker requests per listener
-hour, including cache hits. Sixty listeners over four hours use 57,600 plays
-requests before catalog traffic, other listeners and other account usage. Backoff
-reduces failed-poll traffic; it does not remove Free account limits. Quota or
-metadata failures leave direct Live/Archive and manual audio controls usable,
-although new catalog discovery may be unavailable.
-
-Rollback requires the same explicit publication authorization: restore the last
-known-good Worker version (`wrangler rollback` with the verified version/account)
-or republish the last known-good frontend build. A gateway-origin change requires
-a frontend rebuild. Do not clear the required publishing variable to bypass a
-broken deployment; missing configuration is deliberately a publishing failure.
-
+See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for the current private catalog and relay configuration, tests and rollout gates.
 
 ### Timing repair status (September 12, 2026)
 
