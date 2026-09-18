@@ -13,7 +13,7 @@ const server=http.createServer(async(req,res)=>{
     const controller = new AbortController();
     res.on('close', () => controller.abort());
     const request = new Request(new URL(req.url, `http://127.0.0.1:${server.address().port}`), {method:req.method, headers:req.headers, signal:controller.signal});
-    const env = {ALLOWED_ORIGINS:JSON.stringify([PRODUCTION_ORIGIN,...LOCAL_ORIGINS]), MEDIA_TOKEN_KEY:process.env.MEDIA_TOKEN_KEY,
+    const env = {ALLOWED_ORIGINS:JSON.stringify([PRODUCTION_ORIGIN,...LOCAL_ORIGINS]), MEDIA_TOKEN_KEY:process.env.MEDIA_TOKEN_KEY, MEDIA_STREAM_MODE:'bounded',
       STREAM_CATALOG: {get:async()=>readFile(process.env.HOMECALL_CATALOG_FILE || '.private/catalog.json','utf8')}};
     try {
       const response = await worker.fetch(request,env,{waitUntil:p=>p.catch(()=>{})});

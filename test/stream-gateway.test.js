@@ -16,6 +16,40 @@ function fixture() {
 function req(path, init = {}) { return new Request(`https://gateway.example${path}`, init); }
 const options = fetcher => ({ origins: [origin], fetcher });
 const audio = () => new Response(new Uint8Array([1, 2]), { headers: { 'Content-Type': 'audio/mpeg' } });
+test('missing or malformed media keys identify configuration failures without disabling catalogs or MP3', async () => {
+  for (const key of [undefined, '', 'not-a-key', Buffer.alloc(31).toString('base64url'), secret + '=']) {
+    const f = fixture(); f.env.MEDIA_TOKEN_KEY = key;
+    for (const path of [`/media/game/${team}/match`, '/media/resource/invalid']) {
+      const response = await streamGateway(req(path, {headers:{Origin:origin}}), f.env, options(() => assert.fail('No upstream request for missing configuration')));
+      assert.equal(response.status,503); assert.equal(response.headers.get('Access-Control-Allow-Origin'),origin);
+      assert.deepEqual(await response.json(),{error:'Media configuration unavailable'});
+    }
+    assert.equal((await streamGateway(req('/api/catalog/live'),f.env,options(audio))).status,200);
+    const mp3=await streamGateway(req('/media/live/duke'),f.env,options(audio));
+    assert.equal(mp3.status,200); await mp3.arrayBuffer();
+    for (const method of ['GET','HEAD']) {
+      const playlist=await streamGateway(req('/media/live/duke',{method,headers:{Origin:origin}}),f.env,options(() => new Response('#EXTM3U\n#EXTINF:6,\nsegment.ts\n',{headers:{'Content-Type':'application/vnd.apple.mpegurl'}})));
+      assert.equal(playlist.status,503); assert.equal(playlist.headers.get('Access-Control-Allow-Origin'),origin);
+      assert.equal(await playlist.text(),method==='HEAD'?'':JSON.stringify({error:'Media configuration unavailable'}));
+    }
+  }
+});
+test('configuration 503 survives cancellation of a body errored by abort', async () => {
+  const f=fixture(); delete f.env.MEDIA_TOKEN_KEY;
+  const response=await streamGateway(req('/media/live/duke'),f.env,options((_,init) => new Response(new ReadableStream({
+    start(controller) {init.signal.addEventListener('abort',()=>controller.error(new Error('private upstream error')),{once:true});}
+  }),{headers:{'Content-Type':'application/vnd.apple.mpegurl'}})));
+  assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'Media configuration unavailable'});
+});
+test('native media response preserves cancellation and sanitized headers through the gateway', async () => {
+  const f=fixture();let cancelled=false;
+  const response=await streamGateway(req('/media/live/duke'),f.env,{...options(() => new Response(new ReadableStream({
+    pull(c){c.enqueue(new Uint8Array([1,2]));},cancel(){cancelled=true;}
+  }),{headers:{'Content-Type':'audio/mpeg','Location':'https://audio.example/private'}})),nativeBody:true});
+  assert.equal(response.status,200);assert.equal(response.headers.get('Location'),null);
+  const reader=response.body.getReader();assert.deepEqual([...((await reader.read()).value)],[1,2]);
+  await reader.cancel();assert.equal(cancelled,true);
+});
 test('gateway projects both catalogs without upstream addresses or private configuration', async () => {
   const f = fixture();
   for (const path of ['/api/catalog/live', '/api/catalog/archive']) {

@@ -11,7 +11,7 @@ export default {
       return Response.json({ error: 'Metadata service configuration unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
     }
     const target = request.url.replace(/^https?:\/\/[^/]+/, '');
-    if (target.startsWith('/media/') || target.startsWith('/api/catalog/')) return streamGateway(request, env, {origins, target});
+    if (target.startsWith('/media/') || target.startsWith('/api/catalog/')) return streamGateway(request, env, {origins, target, nativeBody:env.MEDIA_STREAM_MODE==='native'});
     let catalog;
     if (target.startsWith('/api/homestream/') && !target.includes('?') && !target.includes('%')) {
       try { catalog = await readPrivateCatalog(env); } catch { /* Router still validates method/path before failing closed. */ }

@@ -35,7 +35,11 @@ The relay supports GET/HEAD, single Range and If-Range, and returns 200/206/416 
 
 ## Rollout gates
 
+The Worker forwards opaque media bodies through the runtime's native streaming path, avoiding a JavaScript callback and timer for every audio chunk throughout a listening session. On that path the frontend's existing stall watchdog owns idle recovery; the relay still bounds headers, playlists and encryption-key reads. The explicit `MEDIA_STREAM_MODE=native` setting enables this path; other values keep bounded forwarding. After headers, it removes the request-abort listener and relies on runtime body cancellation to close the upstream connection. Standalone native clients do not receive a server-side audio idle deadline. The standalone relay's default bounded wrapper remains available for callers that need a server-side idle deadline. Missing or malformed media encryption configuration returns a distinct 503 for capability and HLS operations while MP3 and catalog routes remain available.
+
 Use the isolated preview Worker and private KV first. Production remains at its existing version until the preview passes source acceptance and the deployment is approved. Do not merge a frontend that points at an unprovisioned gateway. Keep a private copy of the previous catalog and record the previous Worker version before cutover; rollback restores both the Worker and frontend together.
+
+`npm run worker:preview` builds the frontend against the isolated preview gateway and publishes its static files on the preview Worker for real-device testing. Only `/api/*` and `/media/*` invoke the Worker first; other files use static-asset routing. Production Pages hosting and gateway settings are unchanged. Preview catalog refresh remains disabled.
 
 Before production: verify all seven fixed sources (including custom ports and redirects), archive seeking/HEAD/Range, full HLS graph/timestamp/seek behavior, foreground phone audio, interruptions and a game-length session. Inspect browser requests and responses for upstream addresses. Record Free entitlement, account-wide requests/KV reads, deployed cold/warm CPU and permitted provider/platform relay use. The initial pilot proves only the observations recorded with it.
 

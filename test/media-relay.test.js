@@ -6,6 +6,18 @@ const secret = Buffer.alloc(32, 17).toString('base64url');
 const target = { url: 'https://audio.example/live', allowedOrigins: ['https://audio.example'], kind: 'audio' };
 const request = (options) => new Request('https://gateway.example/media/live/station', options);
 const opts = { secret, sourceId: 'station', version: 'v1', now: 1000 };
+test('cleanup of errored upstream bodies preserves validated status and redirects', async () => {
+  const errored = () => new ReadableStream({start(c){c.error(new Error('private provider detail'));}});
+  for(const [status,method,kind] of [[404,'GET','audio'],[200,'HEAD','audio'],[416,'GET','audio'],[200,'HEAD','hls'],[200,'HEAD','key']]) {
+    const r=await relayMedia(request({method}),{...target,kind},{...opts,fetcher:async()=>new Response(errored(),{status,headers:{'Content-Type':'audio/mpeg'}})});
+    assert.equal(r.status,status);assert.ok(!(await r.text()).includes('private provider detail'));
+  }
+  let calls=0;
+  const redirected=await relayMedia(request(),target,{...opts,fetcher:async()=>++calls===1
+    ?new Response(errored(),{status:302,headers:{Location:'https://audio.example/next'}})
+    :new Response('audio',{headers:{'Content-Type':'audio/mpeg'}})});
+  assert.equal(redirected.status,200);assert.equal(await redirected.text(),'audio');assert.equal(calls,2);
+});
 test('stream relay forwards only allowed request/response headers and cancellation', async () => {
   let signal; let cancelled = false; let init;
   const upstream = new ReadableStream({ pull(c) { c.enqueue(new Uint8Array([1])); }, cancel() { cancelled = true; } });
