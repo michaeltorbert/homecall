@@ -265,3 +265,8 @@ test('game capabilities last a whole broadcast and expired or invalid ones answe
   }
   assert.equal(f.writes(), 0);
 });
+
+test('game routes accept only canonical team ids, matching the game-source policy', async () => {
+  const f = fixture(); const blocked = () => assert.fail('No discovery request for a malformed team id');
+  for (const bad of ['0'.repeat(36), '12345678-1234-1234-1234-12345678-abc', 'g2345678-1234-1234-1234-123456789abc']) assert.equal((await streamGateway(req(`/media/game/${bad}/match`), f.env, options(blocked))).status, 404, bad);
+});
