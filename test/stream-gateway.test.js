@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { streamGateway } from '../lib/stream-gateway.mjs';
-import { sealMediaTarget } from '../lib/media-token.mjs';
+import { sealMediaTarget, openMediaTarget } from '../lib/media-token.mjs';
 const stamp = '2026-09-01T00:00:00.000Z';
 const origin = 'https://app.example';
 const secret = Buffer.alloc(32, 29).toString('base64url');
@@ -241,4 +241,27 @@ test('signed game playlists keep the exact-capability rewrite instead of a direc
   assert.equal(entry.status, 200); const text = await entry.text();
   assert.ok(upstream.includes('https://audio.example/hls/gt/index.m3u8?Signature=private')); assert.ok(!text.includes('Signature')); assert.ok(!text.includes('STREAM-INF'));
   assert.match(text.split('\n').find(l => l.startsWith('https://')), /^https:\/\/gateway\.example\/media\/resource\/[A-Za-z0-9_-]+\/segment_1\.ts$/);
+});
+
+test('game capabilities last a whole broadcast and expired or invalid ones answer 403 without an upstream fetch', async () => {
+  const f = fixture();
+  const fetcher = url => url.startsWith('https://discovery.example/games/teams/') ? Response.json({ success: true, games: [{ game_id: 'match', game_type: 'football', home_team_id: team, away_team_id: 'x', date: '2026-09-19', time: '16:00', timezone: 'UTC', home_cloudfront_url: 'https://audio.example/hls/gt/index.m3u8', away_cloudfront_url: 'https://audio.example/hls/o/index.m3u8' }] }) : new Response('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-KEY:METHOD=AES-128,URI="../k/key.bin"\n#EXTINF:1,\nsegment_1.ts\n', { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } });
+  const master = await (await streamGateway(req(`/media/game/${team}/match`), f.env, options(fetcher))).text();
+  const variant = master.split('\n').find(l => l.startsWith('https://')); const token = new URL(variant).pathname.split('/')[3];
+  const now = Math.floor(Date.now() / 1000);
+  const opened = await openMediaTarget(token, secret, { now: (now + 5 * 3600) * 1000 }); assert.equal(opened.target.scope, 'directory');
+  await assert.rejects(openMediaTarget(token, secret, { now: (now + 7 * 3600) * 1000 }), /expired/);
+  const playlist = await (await streamGateway(new Request(variant), f.env, options(fetcher))).text();
+  const keyToken = playlist.match(/URI="https:\/\/gateway\.example\/media\/resource\/([\w-]+)"/)[1];
+  assert.equal((await openMediaTarget(keyToken, secret, { now: (now + 5 * 3600) * 1000 })).target.kind, 'key');
+  const live = await (await streamGateway(req('/media/live/duke'), f.env, options(() => new Response('#EXTM3U\n#EXTINF:1,\nseg.ts\n', { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } })))).text();
+  const liveToken = live.split('\n').find(l => l.startsWith('https://')).split('/')[5];
+  await assert.rejects(openMediaTarget(liveToken, secret, { now: (now + 2 * 3600) * 1000 }), /expired/);
+  const blocked = () => assert.fail('No upstream fetch for a rejected capability');
+  const expired = await sealMediaTarget({ target: { url: 'https://audio.example/hls/gt/', kind: 'resource', allowedOrigins: ['https://audio.example'], scope: 'directory' }, sourceId: `game-${team}-match`, version: f.catalog.version }, secret, { now: Date.now() - 2 * 3600 * 1000, ttlSeconds: 3600 });
+  for (const path of [`/media/resource/${expired}/index.m3u8`, `/media/resource/${expired}/segment_1.ts`, `/media/resource/${token.slice(0, -4)}AAAA/index.m3u8`, '/media/resource/notatoken']) {
+    const response = await streamGateway(new Request(`https://gateway.example${path}`, { headers: { Origin: origin } }), f.env, options(blocked));
+    assert.equal(response.status, 403, path); assert.deepEqual(await response.json(), { error: 'Media link expired' }); assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
+  }
+  assert.equal(f.writes(), 0);
 });
