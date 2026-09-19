@@ -174,3 +174,71 @@ test('archive relay follows a cold-start redirect only to a configured redirect 
   assert.equal((await streamGateway(req('/media/archive/duke/recording'), ported.env, options(redirecting(signed)))).status, 502);
   assert.equal(configured.writes() + unconfigured.writes() + other.writes() + ported.writes(), 0);
 });
+
+test('directory capabilities serve only validated plain names inside the sealed directory', async () => {
+  const f = fixture();
+  const playlist = await streamGateway(req('/media/live/duke'), f.env, options(() => new Response('#EXTM3U\n#EXTINF:1,\nseg_1.ts\n#EXTINF:1,\nseg_2.ts\n', { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } })));
+  const [first, second] = (await playlist.text()).split('\n').filter(l => l.startsWith('https://gateway.example/media/resource/'));
+  const token = new URL(first).pathname.split('/')[3];
+  const upstream = []; const fetcher = (url, init) => { upstream.push([init.method, url]); return audio(); };
+  for (const [path, expected] of [[`/media/resource/${token}/seg_1.ts`, 'https://audio.example/live?private=canary'.replace('live?private=canary', 'seg_1.ts')], [`/media/resource/${token}/seg_2.ts`, 'https://audio.example/seg_2.ts'], [`/media/resource/${token}/other_9.ts`, 'https://audio.example/other_9.ts']]) {
+    const delivered = await streamGateway(new Request(`https://gateway.example${path}`), f.env, options(fetcher));
+    assert.equal(delivered.status, 200, path); await delivered.arrayBuffer(); assert.equal(upstream.at(-1)[1], expected);
+  }
+  assert.equal(new URL(second).pathname, `/media/resource/${token}/seg_2.ts`);
+  const blocked = (url, init) => assert.fail(`No upstream request expected for ${url}`);
+  for (const [path, status] of [[`/media/resource/${token}`, 403], [`/media/resource/${token}/..`, 404], [`/media/resource/${token}/a/b.ts`, 404], [`/media/resource/${token}/a%2eb.ts`, 404], [`/media/resource/${token}/seg%201.ts`, 404], [`/media/resource/${token}/.`, 404], [`/media/resource/${token}/${'x'.repeat(256)}`, 404]]) {
+    const response = await streamGateway(new Request(`https://gateway.example${path}`), f.env, options(blocked));
+    assert.equal(response.status, status, path); assert.ok(!(await response.text()).includes('audio.example'));
+  }
+  const exact = await sealMediaTarget({ target: { url: 'https://audio.example/exact.ts', kind: 'resource', allowedOrigins: ['https://audio.example'] }, sourceId: 'duke', version: f.catalog.version }, secret);
+  assert.equal((await streamGateway(new Request(`https://gateway.example/media/resource/${exact}/seg_1.ts`), f.env, options(blocked))).status, 403);
+  assert.equal((await streamGateway(new Request(`https://gateway.example/media/resource/${exact}`), f.env, options(fetcher))).status, 200);
+  const foreign = await sealMediaTarget({ target: { url: 'https://foreign.example/d/', kind: 'resource', allowedOrigins: ['https://foreign.example'], scope: 'directory' }, sourceId: 'duke', version: f.catalog.version }, secret);
+  assert.equal((await streamGateway(new Request(`https://gateway.example/media/resource/${foreign}/seg_1.ts`), f.env, options(blocked))).status, 403);
+  assert.equal(f.writes(), 0);
+});
+
+test('game entries hand HLS players a directory capability whose live playlists stay provider-sized', async () => {
+  const f = fixture();
+  const live = seq => `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${seq}\n#EXTINF:0.998,\n#EXT-X-PROGRAM-DATE-TIME:2026-09-19T15:40:22.490+0000\nsegment_${seq}.ts\n#EXTINF:0.998,\nsegment_${seq + 1}.ts\n#EXT-X-KEY:METHOD=AES-128,URI="../keys/k.bin"\n#EXTINF:0.998,\n../far/away.ts\n`;
+  let seq = 100; const upstream = [];
+  const fetcher = (url, init) => {
+    upstream.push(url);
+    if (url.startsWith('https://discovery.example/games/teams/')) return Response.json({ success: true, games: [{ game_id: 'match', game_type: 'football', home_team_id: team, away_team_id: 'x', date: '2026-09-19', time: '16:00', timezone: 'UTC', home_cloudfront_url: 'https://audio.example/hls/gt/index.m3u8', away_cloudfront_url: 'https://audio.example/hls/other/index.m3u8', away_team_school_name: 'Mercer' }] });
+    if (url === 'https://audio.example/hls/gt/index.m3u8') return new Response(live(seq++), { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } });
+    if (url === 'https://audio.example/hls/keys/k.bin') return new Response(new Uint8Array(16), { headers: { 'Content-Type': 'application/octet-stream' } });
+    return new Response(new Uint8Array([7, 7]), { headers: { 'Content-Type': 'video/mp2t' } });
+  };
+  const entry = await streamGateway(req(`/media/game/${team}/match`, { headers: { Origin: origin } }), f.env, options(fetcher));
+  assert.equal(entry.status, 200); assert.equal(entry.headers.get('Content-Type'), 'application/vnd.apple.mpegurl'); assert.equal(entry.headers.get('Access-Control-Allow-Origin'), origin);
+  const master = await entry.text(); assert.ok(!master.includes('audio.example')); assert.ok(!upstream.includes('https://audio.example/hls/gt/index.m3u8'), 'entry does not fetch the playlist');
+  const variant = master.split('\n').find(l => l.startsWith('https://')); assert.match(variant, /^https:\/\/gateway\.example\/media\/resource\/[A-Za-z0-9_-]+\/index\.m3u8$/);
+  assert.equal((await streamGateway(req(`/media/game/${team}/match`, { method: 'HEAD' }), f.env, options(fetcher))).status, 200);
+  const first = await streamGateway(new Request(variant), f.env, options(fetcher)); assert.equal(first.status, 200);
+  const text = await first.text(); const lines = text.split('\n');
+  assert.ok(lines.includes('segment_100.ts') && lines.includes('segment_101.ts'), 'same-directory segments stay relative');
+  assert.ok(text.includes('#EXT-X-PROGRAM-DATE-TIME:2026-09-19T15:40:22.490+0000')); assert.ok(!text.includes('audio.example'));
+  const far = lines.find(l => l.startsWith('https://')); assert.match(far, /^https:\/\/gateway\.example\/media\/resource\/[A-Za-z0-9_-]+$/);
+  const keyLine = lines.find(l => l.startsWith('#EXT-X-KEY')); assert.match(keyLine, /URI="https:\/\/gateway\.example\/media\/resource\/[A-Za-z0-9_-]+"$/);
+  assert.ok(text.length < live(100).length + 2 * 'https://gateway.example/media/resource/'.length + 1200, 'relative playlist stays near provider size');
+  const second = await (await streamGateway(new Request(variant), f.env, options(fetcher))).text(); assert.ok(second.includes('#EXT-X-MEDIA-SEQUENCE:101'));
+  const segment = await streamGateway(new Request(new URL('segment_101.ts', variant).href, { headers: { Origin: origin, Range: 'bytes=0-1' } }), f.env, options(fetcher));
+  assert.equal(segment.status, 200); assert.equal(segment.headers.get('Content-Type'), 'video/mp2t'); await segment.arrayBuffer(); assert.equal(upstream.at(-1), 'https://audio.example/hls/gt/segment_101.ts');
+  const key = await streamGateway(new Request(keyLine.match(/URI="([^"]+)"/)[1]), f.env, options(fetcher)); assert.equal(key.status, 200); assert.equal((await key.arrayBuffer()).byteLength, 16);
+  const distant = await streamGateway(new Request(far), f.env, options(fetcher)); assert.equal(distant.status, 200); await distant.arrayBuffer(); assert.equal(upstream.at(-1), 'https://audio.example/hls/far/away.ts');
+  assert.equal(f.writes(), 0);
+});
+
+test('signed game playlists keep the exact-capability rewrite instead of a directory form', async () => {
+  const f = fixture(); const upstream = [];
+  const fetcher = url => {
+    upstream.push(url);
+    if (url.startsWith('https://discovery.example/games/teams/')) return Response.json({ success: true, games: [{ game_id: 'match', game_type: 'football', home_team_id: team, away_team_id: 'x', date: '2026-09-19', time: '16:00', timezone: 'UTC', home_cloudfront_url: 'https://audio.example/hls/gt/index.m3u8?Signature=private', away_cloudfront_url: 'https://audio.example/hls/other/index.m3u8' }] });
+    return new Response('#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nsegment_1.ts\n', { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } });
+  };
+  const entry = await streamGateway(req(`/media/game/${team}/match`), f.env, options(fetcher));
+  assert.equal(entry.status, 200); const text = await entry.text();
+  assert.ok(upstream.includes('https://audio.example/hls/gt/index.m3u8?Signature=private')); assert.ok(!text.includes('Signature')); assert.ok(!text.includes('STREAM-INF'));
+  assert.match(text.split('\n').find(l => l.startsWith('https://')), /^https:\/\/gateway\.example\/media\/resource\/[A-Za-z0-9_-]+\/segment_1\.ts$/);
+});

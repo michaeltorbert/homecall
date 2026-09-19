@@ -36,3 +36,11 @@ test('master traversal rejects foreign/query children and stops after three desc
  }
  let requests=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>({ok:true,text:async()=>`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${origin}/media/resource/token${++requests}\n`})}),'unavailable');assert.equal(requests,4);
 });
+test('master traversal accepts the directory-capability playlist form and still rejects paths beyond it',async()=>{
+ const child=origin+'/media/resource/opaque-token/index.m3u8',requests=[];let sequence=10;
+ assert.equal(await checkPlaylist(url,{origin,sleep:async()=>{},fetcher:async address=>{requests.push(address);return {ok:true,text:async()=>address===url?`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${child}\n`:manifest(sequence++)};}}),'ready');
+ assert.deepEqual(requests,[url,child,child]);
+ for(const bad of [origin+'/media/resource/opaque-token/a/b.m3u8',origin+'/media/resource/opaque-token/..',origin+'/media/resource/opaque-token/index.m3u8?x=1',origin+'/media/resource/opaque-token/'+'x'.repeat(256)]){
+  let count=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>{count++;return {ok:true,text:async()=>`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${bad}\n`};}}),'unavailable');assert.equal(count,1);
+ }
+});

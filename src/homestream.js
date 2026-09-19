@@ -28,7 +28,7 @@ export async function checkPlaylist(url, { signal, fetcher = fetch, sleep = wait
     try {
       const gateway = validateGatewayOrigin(origin ?? configuredGatewayOrigin(), { allowLocal: allowLocal ?? gatewayOptions().allowLocal, required: true });
       const parsed = new URL(value);
-      return parsed.origin === gateway && /^\/media\/resource\/[A-Za-z0-9_-]{1,16100}$/.test(parsed.pathname) && value === `${gateway}${parsed.pathname}` ? value : null;
+      return parsed.origin === gateway && /^\/media\/resource\/[A-Za-z0-9_-]{1,16100}(?:\/[A-Za-z0-9_.-]{1,255})?$/.test(parsed.pathname) && value === `${gateway}${parsed.pathname}` ? value : null;
     } catch { return null; }
   }
   async function sample() {

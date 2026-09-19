@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { relayMedia, validateMediaTarget } from '../lib/media-relay.mjs';
-import { openMediaTarget } from '../lib/media-token.mjs';
+import { openMediaTarget, sealMediaTarget } from '../lib/media-token.mjs';
 const secret = Buffer.alloc(32, 17).toString('base64url');
 const target = { url: 'https://audio.example/live', allowedOrigins: ['https://audio.example'], kind: 'audio' };
 const request = (options) => new Request('https://gateway.example/media/live/station', options);
@@ -70,7 +70,12 @@ test('HLS handles nested variants and rejects unsupported, malicious or oversize
   const good = '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",URI="alternate.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nchild.m3u8\n';
   const relay = async body => relayMedia(request(), { ...target, kind: 'hls' }, { ...opts, fetcher: async () => new Response(body) });
   const text = await (await relay(good)).text();
-  for (const match of text.matchAll(/\/media\/resource\/([\w-]+)/g)) assert.equal((await openMediaTarget(match[1], secret, { now: 1000 })).target.kind, 'hls');
+  // Same-directory variants share the directory capability; their playlist purpose follows the .m3u8 name.
+  const matches = [...text.matchAll(/\/media\/resource\/([\w-]+)\/([\w.-]+)/g)]; assert.equal(matches.length, 2);
+  assert.deepEqual(matches.map(m => m[2]), ['alternate.m3u8', 'child.m3u8']); assert.equal(new Set(matches.map(m => m[1])).size, 1);
+  assert.equal((await openMediaTarget(matches[0][1], secret, { now: 1000 })).target.scope, 'directory');
+  const distant = '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",URI="../other/alternate.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nchild?sig=1\n';
+  for (const match of (await (await relay(distant)).text()).matchAll(/\/media\/resource\/([\w-]+)$/gm)) assert.equal((await openMediaTarget(match[1], secret, { now: 1000 })).target.kind, 'hls');
   for (const body of ['#EXTM3U\nhttps://evil.example/a', '#EXTM3U\n# comment https://audio.example/private', '#EXTM3U\n#EXT-X-PART:URI="a"', '#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI="a"', '#EXTM3U\n#EXT-X-SESSION-DATA:URI="a"', '#EXTM3U\n' + 'a'.repeat(300000)]) assert.equal((await relay(body)).status, 502);
 });
 test('request abort propagates and bounded header timeout terminates fetch', async () => {
@@ -186,4 +191,31 @@ test('HLS accepts the provider\'s basic-format timestamp offset and a one-second
   assert.equal((text.match(/#EXT-X-PROGRAM-DATE-TIME:2026-09-19T15:40:\d{2}\.490\+0000/g) || []).length, 350);
   assert.equal((text.match(/\/media\/resource\//g) || []).length, 350); assert.ok(!text.includes('audio.example'));
   for (const bad of ['2026-09-19T15:40:22.490+00', '2026-09-19T15:40:22.490 +0000', '2026-09-19T15:40:22.490+00:0', '2026-09-19 15:40:22Z']) assert.equal((await relay(`#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:${bad}\n#EXTINF:1,\na.ts\n`)).status, 502);
+});
+test('plain same-directory segments share one directory capability; everything else keeps its own', async () => {
+  const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nseg_1.ts\n#EXTINF:1,\nseg_2.ts\n#EXTINF:1,\n../up.ts\n#EXTINF:1,\nsub/deep.ts\n#EXTINF:1,\nquery.ts?sig=private\n#EXTINF:1,\n.\n';
+  const relay = async (body, extra = {}) => relayMedia(request(), { ...target, ...extra, url: 'https://audio.example/live/abc/index.m3u8', kind: 'hls' }, { ...opts, fetcher: async () => new Response(body) });
+  const response = await relay(playlist); assert.equal(response.status, 200);
+  const lines = (await response.text()).split('\n').filter(l => l.startsWith('https://'));
+  assert.equal(lines.length, 6); assert.ok(lines.every(l => l.startsWith('https://gateway.example/media/resource/')));
+  const [a, b, up, deep, query, dot] = lines.map(l => l.slice('https://gateway.example/media/resource/'.length));
+  assert.equal(a.split('/')[0], b.split('/')[0]); assert.ok(a.endsWith('/seg_1.ts') && b.endsWith('/seg_2.ts'));
+  const directory = await openMediaTarget(a.split('/')[0], secret, { now: 1000 });
+  assert.deepEqual(directory.target, { url: 'https://audio.example/live/abc/', kind: 'resource', allowedOrigins: ['https://audio.example'], scope: 'directory' });
+  for (const [token, url] of [[up, 'https://audio.example/live/up.ts'], [deep, 'https://audio.example/live/abc/sub/deep.ts'], [query, 'https://audio.example/live/abc/query.ts?sig=private'], [dot, 'https://audio.example/live/abc/']]) {
+    assert.ok(!token.includes('/')); const opened = await openMediaTarget(token, secret, { now: 1000 }); assert.equal(opened.target.url, url); assert.equal(opened.target.scope, undefined);
+  }
+  // A path policy that excludes the directory itself falls back to exact per-segment capabilities.
+  const narrow = await (await relay('#EXTM3U\n#EXTINF:1,\nseg_1.ts\n', { allowedPaths: ['/live/abc/index.m3u8', '/live/abc/seg_1.ts'] })).text();
+  const only = narrow.split('\n').find(l => l.startsWith('https://')).slice('https://gateway.example/media/resource/'.length);
+  assert.ok(!only.includes('/')); assert.equal((await openMediaTarget(only, secret, { now: 1000 })).target.url, 'https://audio.example/live/abc/seg_1.ts');
+  assert.equal((await relay('#EXTM3U\n#EXTINF:1,\nseg_1.ts\n', { allowedPaths: ['/live/abc/'] })).status, 200);
+});
+test('directory capabilities reject non-directory scopes and malformed forms at seal time', async () => {
+  const base = { sourceId: 'live-x', version: '1' };
+  await assert.rejects(sealMediaTarget({ ...base, target: { url: 'https://a.example/d/', kind: 'hls', allowedOrigins: ['https://a.example'], scope: 'directory' } }, secret), /Invalid media payload/);
+  await assert.rejects(sealMediaTarget({ ...base, target: { url: 'https://a.example/d/file.ts', kind: 'resource', allowedOrigins: ['https://a.example'], scope: 'directory' } }, secret), /Invalid media payload/);
+  await assert.rejects(sealMediaTarget({ ...base, target: { url: 'https://a.example/d/', kind: 'resource', allowedOrigins: ['https://a.example'], scope: 'prefix' } }, secret), /Invalid media payload/);
+  const ok = await sealMediaTarget({ ...base, target: { url: 'https://a.example/d/', kind: 'resource', allowedOrigins: ['https://a.example'], scope: 'directory' } }, secret);
+  assert.equal((await openMediaTarget(ok, secret)).target.scope, 'directory');
 });
