@@ -147,3 +147,22 @@ test('existing live capabilities respect current source presence origins and pat
   delete f.catalog.live.duke;
   assert.equal((await streamGateway(request(),f.env,options(()=>assert.fail('Removed source must block upstream')))).status,403);
 });
+
+test('archive relay follows a cold-start redirect only to a configured redirect origin', async () => {
+  const replay = () => new Response(new Uint8Array([2, 3]), { status: 206, headers: { 'Content-Type': 'audio/mpeg', 'Content-Range': 'bytes 0-1/4', 'Accept-Ranges': 'bytes', 'Content-Length': '2' } });
+  const redirecting = destination => (url, init) => {
+    if (url === 'https://audio.example/replay/123.mp3') { assert.equal(init.redirect, 'manual'); return new Response(null, { status: 302, headers: { Location: destination } }); }
+    assert.equal(url, destination); return replay();
+  };
+  const signed = 'https://store.example/replay/123.mp3?token=private';
+  const configured = fixture(); configured.catalog.archiveConfig.redirectOrigins = { duke: ['https://store.example'] };
+  const response = await streamGateway(req('/media/archive/duke/recording', { headers: { Origin: origin, Range: 'bytes=0-1' } }), configured.env, options(redirecting(signed)));
+  assert.equal(response.status, 206); assert.equal(response.headers.get('Location'), null); assert.equal((await response.arrayBuffer()).byteLength, 2);
+  for (const path of ['/media/archive/duke/recording', '/api/catalog/archive']) assert.ok(!(await (await streamGateway(req(path), configured.env, options(redirecting(signed)))).text()).includes('store.example'));
+  const unconfigured = fixture();
+  const blocked = await streamGateway(req('/media/archive/duke/recording', { headers: { Origin: origin } }), unconfigured.env, options(redirecting(signed)));
+  assert.equal(blocked.status, 502); assert.ok(!(await blocked.text()).includes('store.example'));
+  const other = fixture(); other.catalog.archiveConfig.redirectOrigins = { vt: ['https://store.example'] };
+  assert.equal((await streamGateway(req('/media/archive/duke/recording'), other.env, options(redirecting(signed)))).status, 502);
+  assert.equal(configured.writes() + unconfigured.writes() + other.writes(), 0);
+});
