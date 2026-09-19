@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { setupArchive } from '../src/archive.js';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
-const item={id:'one',opponent:'Tulane',sport:'Football',start:'2026-09-05T18:00:00Z',kind:'Game recording',url:'https://s3.amazonaws.com/archive.leanplayer.com/gameday/1788631200_35_70596105.mp3'};
+const item={id:'one',opponent:'Tulane',sport:'Football',start:'2026-09-05T18:00:00Z',kind:'Game recording',url:'https://gateway.example/media/archive/duke/one'};
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 function harness(t, fetcher, memory, sync) {
   const dom=new JSDOM(html,{url:'https://example.test/homecall/'});
@@ -15,7 +15,7 @@ function harness(t, fetcher, memory, sync) {
   const $=id=>document.getElementById(id), audio=$('replay-audio');
   let stops=0,paused=0,loads=0,plays=0;
   audio.pause=()=>{paused++;}; audio.load=()=>{loads++;};audio.play=async()=>{plays++;};
-  setupArchive({stopLive:()=>{stops++;},selectedTeam:()=> 'duke',memory,sync});
+  setupArchive({stopLive:()=>{stops++;},selectedTeam:()=> 'duke',memory,sync,origin:"https://gateway.example"});
   return {$,audio,counts:()=>({stops,paused,loads,plays}),dom};
 }
 test('archive stops live audio, supports playback, filters and unloads when leaving or changing school',async t=>{

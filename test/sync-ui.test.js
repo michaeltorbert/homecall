@@ -11,7 +11,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
 function harness(t,{delayTeams=false,duplicate=false,ageMs=0,requestMs=0,delayPlays=false,wrongEvent=false,failSchedule=false,gateway='',timingSource='gateway'}={}){
  const dom=new JSDOM(html,{url:'http://example.test/',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;t.after(()=>w.close());
  w.__GATEWAY_ORIGIN__=gateway;const requests=[],browserRequests=[];
- const base=Date.now(),school='Duke',game={id:'one',opponent:'Illinois',start:base,url:'https://example.cloudfront.net/live.m3u8'};
+ const base=Date.now(),school='Duke',game={id:'one',opponent:'Illinois',start:base,url:'https://gateway.example/media/game/team/one'};
  const plays=[{id:'a',quarter:1,clock:'10:00',utc:base+10000,text:'First play'},{id:'b',quarter:1,clock:duplicate?'10:00':'9:00',utc:base+20000,text:'Second play'}];
  let player,catalog,resolveTeams,resolvePlays,failPlays=false;
  const providerTeam={id:'150',name:school,homestreamId:'duke'};
@@ -98,7 +98,7 @@ test('new snapshot invalidates saved choices, including corrected play timestamp
  const old=h.$('matches').children[0];h.plays[0].utc+=1000;await h.timers.at(-1).callback();old.click();assert.equal(h.player.seeks.length,0);assert.match(h.$('result').textContent,/no longer/);
 });
 test('same event with a different feed clears calibration',async t=>{
- const h=harness(t);h.ui.activate();await tick();h.$('offset').value='5';h.game.url='https://example.cloudfront.net/other.m3u8';await h.catalog.refresh();await tick();assert.equal(h.$('offset').value,'0');
+ const h=harness(t);h.ui.activate();await tick();h.$('offset').value='5';h.game.url='https://gateway.example/media/game/team/two';await h.catalog.refresh();await tick();assert.equal(h.$('offset').value,'0');
 });
 
 test('browser recorded-play mode is explicit and transport changes keep audio playing',async t=>{

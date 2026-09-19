@@ -1,0 +1,48 @@
+# Private stream gateway
+
+The frontend contains public labels, stable source IDs, official attribution links and the gateway origin. Provider media addresses and discovery configuration live in the `STREAM_CATALOG` KV binding under `catalog`. The build never contacts a provider or emits an archive JSON file. Historical Git copies are outside this migration.
+
+Public routes are `/api/catalog/live`, `/api/catalog/archive`, the existing Homestream metadata routes, and `/media/live/<id>`, `/media/archive/<school>/<id>`, `/media/game/<team>/<game>`. HLS playlists rewrite all supported resource references to authenticated AES-GCM capabilities. A game entry whose playlist has a plain filename answers with a one-variant master naming a directory capability, `/media/resource/<token>/<name>`; playlists served through that capability emit plain same-directory names unchanged, so a live playlist reloaded every second stays the provider's size and costs one regex per line rather than one seal. Names are limited to `[A-Za-z0-9_.-]` with no separators, so a capability never reaches outside its sealed directory; keys, query-signed or distant references keep exact per-resource capabilities. Provider filenames (not hosts or paths above the directory) are therefore visible in gateway URLs, and a holder of a directory capability can request any plain-named file in that upstream directory, subject to the content-type allowlist; narrow `allowedPaths` in the private catalog if a provider co-locates unrelated files. A playlist at an origin's root never receives a directory capability. The entry itself no longer contacts the provider, so a game entry's 200 or HEAD is not a liveness signal; the client probe and player judge the variant. The key is the Worker secret `MEDIA_TOKEN_KEY`, a canonical base64url encoding of 32 random bytes. Tokens last one hour; a player that outlives a variant token reloads its original gateway root through bounded recovery. Unsupported playlist extensions/DRM fail visibly. Relaying conceals upstream addresses; it does not prevent recording or sharing the gateway audio.
+
+## Private configuration
+
+Keep the administrator's JSON in `.private/catalog.json` (ignored, permissions 0600) or an external private file. Never paste its contents into a PR, workflow, log or command argument. Validate before publishing with `node scripts/validate-private-catalog.mjs <file>`. Upload from the file with Wrangler `kv key put catalog --path <file> --binding STREAM_CATALOG --env preview --remote`. The CLI may print values with some commands; do not use a public terminal log for key reads. Provision the key through `wrangler secret put MEDIA_TOKEN_KEY --env preview` via stdin. Do not use a `VITE_` variable for private data.
+
+The document has `schemaVersion: 1`, a bounded `version` policy identifier, `updatedAt`, and:
+
+- `live`: source ID to `{url, allowedOrigins, kind: "audio"}`; each exact HTTPS origin, including any explicit port, is administrator approved. Optional `allowedPaths` narrows redirects/resources.
+- `archive`: `checkedAt` and school records with legacy `source` (never projected; public attribution comes from the fixed public school map), `status`, original `checkedAt` and items `{id, opponent, sport, start, url, kind}`.
+- `archiveConfig`: `dukePlayer`, exact `dukeFeedPath`, `vtFeed`, and per-school `replayRules` entries `{origin, pathPrefix, filenamePattern}`. Optional per-school `redirectOrigins` lists exact HTTPS origins a replay host may redirect a cold request to (Virginia Tech answers a recording's first request with a signed redirect); redirects elsewhere still fail closed. Like a live source's `allowedOrigins`, an approved redirect origin is trusted for any path and for up to four hops among that school's approved origins; approving one is an administrator decision about that host, not about one recording.
+- `discovery`: `homestreamBase` and exact `mediaOrigins` approved from provider discovery. Newly introduced CDN origins fail closed until reviewed and configured.
+
+Change `version` to revoke resource capabilities after a policy change. Routine archive refresh keeps it stable. KV is eventually consistent; revocation may take propagation time. Public handlers never write KV. Successful unsigned game resolutions have a bounded 15-second in-memory cache; expired entries are not served on failure. KV is read on every request; a byte-identical document reuses its validated parse, so no policy change is ever served stale. The six-hour scheduled job is the sole publisher, enabled only with `ENABLE_CATALOG_REFRESH=true`. Pause its schedule and allow any bounded refresh to finish before administrative replacement; KV provides no atomic lock. Failed refreshes preserve per-school last-good data and check time. Successful empty listings are authoritative. Each run makes at most one write, with a two-minute source-work deadline and 5 MB document limit.
+
+## Local checks
+
+```sh
+npm ci
+npm test
+npm run test:worker
+npm run worker:dry-run
+HOMECALL_CATALOG_FILE=.private/catalog.json npm run check:private
+VITE_GATEWAY_ORIGIN=http://127.0.0.1:4178 HOMECALL_CATALOG_FILE=.private/catalog.json npm run build
+HOMECALL_CATALOG_FILE=.private/catalog.json npm start
+```
+
+For local HLS, also supply `MEDIA_TOKEN_KEY` privately to the Node server. `worker:dev` uses the separate local KV binding, which must be seeded locally. Synthetic tests require no actual endpoints or credentials. The optional private-inventory scan checks exact known URLs as well as structural client checks; CI alone cannot know every private value. Tests enforce catalog-only gateway routes and reject cross-origin/redirected discovery.
+
+The relay supports GET/HEAD, single Range and If-Range, and returns 200/206/416 without caching partial bodies. It strips provider headers and errors, checks each redirect, stops upstream when the listener cancels, and does not concatenate or retry provider streams on the server. CORS permits exact configured site origins; native origin-less media requests remain supported. CORS is not authorization or quota protection. Local HTTP is restricted to loopback development. Live recovery tries the same source at most three times (1/2/4 seconds), discarding old PCM and restoring the chosen numerical delay. A pause, browser gesture requirement, or exhausted retries leaves manual recovery. No TV alignment claim is made.
+
+## Rollout gates
+
+The Worker forwards opaque media bodies through the runtime's native streaming path, avoiding a JavaScript callback and timer for every audio chunk throughout a listening session. On that path the frontend's existing stall watchdog owns idle recovery; the relay still bounds headers, playlists and encryption-key reads. The explicit `MEDIA_STREAM_MODE=native` setting enables this path; other values keep bounded forwarding. After headers, it removes the request-abort listener and relies on runtime body cancellation to close the upstream connection. Standalone native clients do not receive a server-side audio idle deadline. The standalone relay's default bounded wrapper remains available for callers that need a server-side idle deadline. Missing or malformed media encryption configuration returns a distinct 503 for capability and HLS operations while MP3 and catalog routes remain available.
+
+Use the isolated preview Worker and private KV first. Production remains at its existing version until the preview passes source acceptance and the deployment is approved. Do not merge a frontend that points at an unprovisioned gateway. Keep a private copy of the previous catalog and record the previous Worker version before cutover; rollback restores both the Worker and frontend together.
+
+`npm run worker:preview` builds the frontend against the isolated preview gateway and publishes its static files on the preview Worker for real-device testing. Only `/api/*` and `/media/*` invoke the Worker first; other files use static-asset routing. Production Pages hosting and gateway settings are unchanged. Preview catalog refresh remains disabled.
+
+Before production: verify all seven fixed sources (including custom ports and redirects), archive seeking/HEAD/Range, full HLS graph/timestamp/seek behavior, foreground phone audio, interruptions and a game-length session. Inspect browser requests and responses for upstream addresses. Record Free entitlement, account-wide requests/KV reads, deployed cold/warm CPU and permitted provider/platform relay use. The initial pilot proves only the observations recorded with it.
+
+Workers Free currently allows 100,000 account-wide requests/day and 10 ms CPU/invocation; KV Free allows 100,000 reads and 1,000 writes/day. Every segment and playlist uses a Worker request and this implementation reads its catalog once per request. A separate Worker or Cache API does not expand account quota. At six-second segments plus six-second playlist reloads, four hours is about 4,800 media requests per listener before probes/discovery/other account traffic. This is a planning example, not measured demand. No paid upgrade is authorized by this implementation.
+
+Primary references: [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [KV limits](https://developers.cloudflare.com/kv/platform/limits/), [Developer Platform terms](https://www.cloudflare.com/service-specific-terms-developer-platform/), [Application Services terms](https://www.cloudflare.com/service-specific-terms-application-services/). The CDN audio restriction is not a blanket statement about all Workers usage; deployment suitability and provider permission still require case-specific confirmation.

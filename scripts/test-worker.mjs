@@ -3,17 +3,25 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { Miniflare, Response as FixtureResponse } from 'miniflare';
-execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--env=', '--dry-run', '--outdir', 'output/worker-dry-run'], { stdio: 'inherit' });
+execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--env=', '--dry-run', '--outdir', 'output/worker-dry-run'], { stdio: 'inherit', env:{...process.env,WRANGLER_LOG_PATH:'output/wrangler-test.log',WRANGLER_SEND_METRICS:'false'} });
 const config = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
 const bundle = readFileSync('output/worker-dry-run/index.js', 'utf8');
 const origin = 'https://michaeltorbert.github.io';
+const catalog={schemaVersion:1,version:'test-v1',updatedAt:'2026-09-01T00:00:00Z',live:{fixture:{url:'https://audio.example/live',allowedOrigins:['https://audio.example'],kind:'audio'}},archive:{checkedAt:'2026-09-01T00:00:00Z',schools:{}},discovery:{homestreamBase:'https://discovery.example',mediaOrigins:['https://audio.example']}};
 const uuid = '410422f0-663f-4e3d-82e2-787d954ae29d';
 let calls = 0;
+let streamClosed = false;
+const streamingUpstream = (req,res) => {
+  res.setHeader('Content-Type','audio/mpeg');
+  const timer=setInterval(()=>res.write(Buffer.alloc(1024)),20);
+  res.on('close',()=>{streamClosed=true;clearInterval(timer);});
+};
 const upstream = async request => {
   calls++;
   const url = new URL(request.url);
   assert.equal(request.headers.get('Authorization'), null);
   assert.equal(request.headers.get('Cookie'), null);
+  if (url.hostname === 'audio.example') return new FixtureResponse(new Uint8Array([73,68,51,0,1,2]), {headers:{'Content-Type':'audio/mpeg','Location':'https://audio.example/private','Set-Cookie':'private=1'}});
   if (url.searchParams.get('event') === '2') return FixtureResponse.redirect('https://unexpected.invalid/redirect');
   if (url.hostname === 'unexpected.invalid') throw Error('A redirect must never be followed');
   if (url.searchParams.get('event') === '3') return new FixtureResponse('<html>invalid</html>', { headers: { 'Content-Type': 'text/html' } });
@@ -41,8 +49,12 @@ const mf = new Miniflare({
   workers: [
     { config: { name: 'gateway', type: 'worker', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'index.js', modules: { 'index.js': { type: 'esm', contents: bundle } } },
-      env: { ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS } }
+      env: { MEDIA_STREAM_MODE: {type:'text',value:'native'}, ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS }, STREAM_CATALOG: {type:'kv',id:'fixture-catalog'} }
     }, dev: { outboundService: { type: 'fetcher', handler: upstream } } },
+    { config: { name: 'cancel-probe', type: 'worker', compatibilityDate: config.compatibility_date,
+      manifest: { mainModule: 'index.js', modules: { 'index.js': { type: 'esm', contents: bundle } } },
+      env: { MEDIA_STREAM_MODE: {type:'text',value:'native'}, ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS }, STREAM_CATALOG: {type:'kv',id:'fixture-catalog'} }
+    }, dev: { outboundService: {type:'node-handler',handler:streamingUpstream} } },
     { config: { name: 'reader-probe', type: 'worker', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'probe.mjs', modules: {
         'probe.mjs': { type: 'esm', contents: readerProbe },
@@ -53,6 +65,8 @@ const mf = new Miniflare({
 });
 try {
   const local = await mf.ready;
+  const kv=await mf.getKVNamespace('STREAM_CATALOG','gateway');
+  await kv.put('catalog',JSON.stringify(catalog));
   const request = (target, init) => fetch(new URL(target, local), init);
   for (const target of ['/api/homestream/teams', `/api/homestream/games/${uuid}`, '/api/sync/teams', '/api/sync/schedule/150/2026']) {
     const response = await request(target, { headers: { Origin: origin, Authorization: 'do-not-forward', Cookie: 'do-not-forward' } });
@@ -61,6 +75,22 @@ try {
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
     assert.ok(Array.isArray(await response.json()));
   }
+  const projected=await (await request('/api/catalog/live')).json();
+  assert.equal(projected[0].id,'fixture');assert.equal(new URL(projected[0].url).pathname,'/media/live/fixture');
+  assert.ok(!JSON.stringify(projected).includes('audio.example'));
+  const media=await request('/media/live/fixture',{headers:{Origin:origin,Authorization:'private',Cookie:'private=1'}});
+  assert.equal(media.status,200);assert.equal(media.headers.get('Content-Type'),'audio/mpeg');
+  assert.equal(media.headers.get('Location'),null);assert.equal(media.headers.get('Set-Cookie'),null);
+  assert.deepEqual([...new Uint8Array(await media.arrayBuffer())],[73,68,51,0,1,2]);
+  const cancelWorker=await mf.getWorker('cancel-probe');
+  const continuous=await cancelWorker.fetch('https://gateway.example/media/live/fixture');
+  const continuousReader=continuous.body.getReader();
+  assert.ok((await continuousReader.read()).value.length>0);
+  await continuousReader.cancel();
+  for(let i=0;i<100&&!streamClosed;i++)await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(streamClosed,true,'Client cancellation must close the upstream HTTP response in workerd');
+  assert.equal((await request('/media/live/unknown')).status,404);
+  assert.equal(await kv.get('catalog'),JSON.stringify(catalog),'Public requests must never write the private catalog');
   const before = calls;
   const first = await (await request('/api/sync/plays/1', { headers: { Origin: origin } })).json();
   await new Promise(resolve => setTimeout(resolve, 120));
@@ -88,6 +118,6 @@ try {
   const runtime = await (await probe.fetch('https://probe.invalid')).json();
   assert.deepEqual(runtime, {timeout:true,cancelled:true,cache:'no-store',credentials:'omit',redirect:'manual',combinedSignal:true});
   console.log(JSON.stringify({ result: 'PASS', workerd: JSON.parse(readFileSync('node_modules/workerd/package.json')).version,
-    checks: ['five HTTP route families', 'array and plays body shapes', 'cache hit and age recomputation', 'per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility'],
+    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'five HTTP route families', 'array and plays body shapes', 'cache hit and age recomputation', 'per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility'],
     limitation: 'Local workerd with fixture upstreams; no deployed cache, platform CPU, browser HLS or account entitlement proof.' }, null, 2));
 } finally { await mf.dispose(); }

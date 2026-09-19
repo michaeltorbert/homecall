@@ -1,28 +1,7 @@
-// Only anonymous catalog routes are used. Media addresses always come from the catalog.
-export const HOMESTREAM_API = 'https://oln2xaggec.execute-api.us-east-1.amazonaws.com/v1';
-export function mediaURL(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && /^[a-z0-9-]+\.cloudfront\.net$/.test(url.hostname) && !url.username && !url.password && !url.port && url.pathname.endsWith('.m3u8') ? url.href : null;
-  } catch { return null; }
-}
-export function normalizeTeams(data) {
-  if (data?.success !== true || !Array.isArray(data.teams)) throw Error('catalog-invalid');
-  return data.teams.filter(t => typeof t?.team_id === 'string' && typeof t.school_name === 'string')
-    .map(t => ({ id: t.team_id, name: t.school_name.trim() }));
-}
-export function normalizeGames(data, teamId) {
-  if (data?.success !== true || !Array.isArray(data.games)) throw Error('catalog-invalid');
-  return data.games.filter(g => g?.game_type === 'football' && typeof g.game_id === 'string' && (g.home_team_id === teamId || g.away_team_id === teamId)).map(g => {
-    const home = g.home_team_id === teamId;
-    const start = g.timezone === 'UTC' && /^\d{4}-\d{2}-\d{2}$/.test(g.date) && /^\d{2}:\d{2}$/.test(g.time) ? Date.parse(`${g.date}T${g.time}:00Z`) : NaN;
-    return { id: g.game_id, opponent: String((home ? g.away_team_school_name : g.home_team_school_name) || (home ? g.away_team : g.home_team) || 'Opponent pending'),
-      start: Number.isFinite(start) ? start : null, date: typeof g.date === 'string' ? g.date : '',
-      url: mediaURL(home ? g.home_cloudfront_url : g.away_cloudfront_url) };
-  }).sort((a, b) => (a.start ?? Infinity) - (b.start ?? Infinity));
-}
+import { mediaURL, configuredGatewayOrigin, gatewayOptions, validateGatewayOrigin } from './gateway.js';
+export { mediaURL } from './gateway.js';
 export async function readJSON(url, { signal, fetcher = fetch } = {}) {
-  const response = await fetcher(url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000), credentials: 'omit', cache: 'no-store' });
+  const response = await fetcher(url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000), credentials: 'omit', redirect: 'error', cache: 'no-store' });
   if (!response.ok) throw Error('catalog-unavailable');
   return response.json();
 }
@@ -42,12 +21,33 @@ export function wait(ms, signal) {
     signal?.addEventListener('abort', abort, { once: true });
   });
 }
-export async function checkPlaylist(url, { signal, fetcher = fetch, sleep = wait } = {}) {
-  if (!mediaURL(url)) return 'unpublished';
+export async function checkPlaylist(url, { signal, fetcher = fetch, sleep = wait, origin, allowLocal } = {}) {
+  if (!mediaURL(url, { origin, allowLocal })) return 'unpublished';
+  let mediaEndpoint = url;
+  function resourceURL(value) {
+    try {
+      const gateway = validateGatewayOrigin(origin ?? configuredGatewayOrigin(), { allowLocal: allowLocal ?? gatewayOptions().allowLocal, required: true });
+      const parsed = new URL(value);
+      return parsed.origin === gateway && /^\/media\/resource\/[A-Za-z0-9_-]{1,16100}(?:\/[A-Za-z0-9_.-]{1,255})?$/.test(parsed.pathname) && value === `${gateway}${parsed.pathname}` ? value : null;
+    } catch { return null; }
+  }
   async function sample() {
-    const response = await fetcher(url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000), cache: 'no-store', credentials: 'omit' });
-    if (!response.ok) throw Error(response.status === 404 ? 'missing' : 'unavailable');
-    return playlistState(await response.text());
+    for (let depth = 0; depth <= 3; depth++) {
+      const response = await fetcher(mediaEndpoint, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000), cache: 'no-store', credentials: 'omit', redirect: 'error' });
+      if (!response.ok) throw Error(response.status === 404 ? 'missing' : 'unavailable');
+      const text = await response.text();
+      if (text.length > 256 * 1024 || !text.trimStart().startsWith('#EXTM3U')) throw Error('playlist-invalid');
+      if (!/^#EXT-X-STREAM-INF:/m.test(text)) return playlistState(text);
+      const lines = text.split(/\r?\n/).map(line => line.trim());
+      const index = lines.findIndex(line => line.startsWith('#EXT-X-STREAM-INF:'));
+      const child = lines.slice(index + 1).find(line => line && !line.startsWith('#'));
+      // A master served through a directory capability names same-directory variants relatively.
+      let resolved = null; try { resolved = child && !/[\s\\]/.test(child) ? new URL(child, mediaEndpoint).href : null; } catch {}
+      const next = resourceURL(resolved);
+      if (!next || depth === 3) throw Error('playlist-invalid');
+      mediaEndpoint = next;
+    }
+    throw Error('playlist-invalid');
   }
   try {
     const first = await sample();

@@ -19,3 +19,5 @@ public/archive.json
 .wrangler/
 .dev.vars
 .dev.vars.*
+
+.private/

@@ -7,13 +7,15 @@
     "test": "node --test test/*.test.js",
     "start": "node server.mjs",
     "refresh:archive": "node scripts/refresh-archive.mjs",
-    "build": "npm run check:gateway && node scripts/refresh-archive.mjs && vite build",
+    "build": "npm run check:gateway && node scripts/check-private-urls.mjs && vite build && node scripts/check-private-urls.mjs --dist",
     "check:gateway": "node scripts/check-gateway.mjs",
     "worker:dev": "wrangler dev --local --env local --ip 127.0.0.1 --port 8787",
     "worker:dry-run": "wrangler deploy --env=\"\" --dry-run --outdir output/worker-dry-run",
-    "worker:deploy": "wrangler deploy --env=\"\"",
+    "worker:deploy": "node scripts/check-worker-deploy.mjs && wrangler deploy --env=\"\"",
     "worker:types": "wrangler types output/worker-configuration.d.ts",
-    "test:worker": "node scripts/test-worker.mjs"
+    "test:worker": "node scripts/test-worker.mjs",
+    "check:private": "node scripts/check-private-urls.mjs",
+    "worker:preview": "VITE_GATEWAY_ORIGIN=https://homecall-private-streams-preview.homecall.workers.dev npm run build && wrangler deploy --env preview"
   },
   "dependencies": {
     "hls.js": "^1.7.3",

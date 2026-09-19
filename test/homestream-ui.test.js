@@ -1,17 +1,17 @@
-import { metadataURL } from '../src/gateway.js';
+import { metadataURL, mediaURL } from '../src/gateway.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { readFileSync } from 'node:fs';
 const source=readFileSync(new URL('../src/homestream-ui.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export function','function');
 const tick=()=>new Promise(r=>setImmediate(r));
-function harness(t,{read,probe,gateway=''}={}){
+function harness(t,{read,probe,gateway='https://gateway.example'}={}){
  const dom=new JSDOM('<section id="game-panel"><select id="game"></select><p id="game-note"></p><button id="game-refresh"></button></section>',{url:'https://example.test/homecall/',runScripts:'outside-only'});t.after(()=>dom.window.close());
- const w=dom.window;w.AbortController=AbortController;w.metadataURL=metadataURL;w.__GATEWAY_ORIGIN__=gateway;w.readJSON=read;w.checkPlaylist=probe;w.eval(source+';window.setup=setupHomestream;');
+ const w=dom.window;w.AbortController=AbortController;w.metadataURL=metadataURL;w.mediaURL=mediaURL;w.__GATEWAY_ORIGIN__=gateway;w.readJSON=read;w.checkPlaylist=probe;w.eval(source+';window.setup=setupHomestream;');
  let stopped=0,rendered=0;const ui=w.setup({onChange:()=>{stopped++},onReady:()=>{rendered++}});
  return{ui,w,$:id=>w.document.getElementById(id),get stopped(){return stopped},get rendered(){return rendered}};
 }
-const games=[{id:'now',start:Date.now(),url:'https://example.cloudfront.net/now.m3u8',opponent:'Tennessee'},{id:'future',start:Date.now()+604800000,url:null,opponent:'Mercer'}];
+const games=[{id:'now',start:Date.now(),url:'https://gateway.example/media/game/team-id/now',opponent:'Tennessee'},{id:'future',start:Date.now()+604800000,url:null,opponent:'Mercer'}];
 const reader=async url=>url.pathname.endsWith('/teams')?[{id:'team-id',name:'Georgia Tech'}]:games;
 test('discovery enables only advancing feed; unpublished selection stops playback and disables readiness',async t=>{
  const h=harness(t,{read:reader,probe:async()=> 'ready'});h.ui.setEnabled(true);await tick();
@@ -27,7 +27,15 @@ test('refresh re-fetches exact addresses and blocks old source while catalog is 
  h.ui.setEnabled(true);await tick();assert.ok(h.ui.ready);fail=true;await h.ui.refresh();assert.equal(h.ui.ready,null);assert.match(h.$('game-note').textContent,/catalog could not load/);assert.equal(h.$('game-refresh').disabled,false);
 });
 
-test('Homestream discovery sends both metadata requests to the configured gateway while media probes stay direct',async t=>{
+test('Homestream discovery sends both metadata requests to the configured gateway and media probes use the relay',async t=>{
  const requests=[],probes=[];const h=harness(t,{gateway:'https://gateway.example',read:async url=>{requests.push(url.href);return reader(url);},probe:async url=>{probes.push(url);return 'ready';}});
  h.ui.setEnabled(true);await tick();assert.deepEqual(requests,['https://gateway.example/api/homestream/teams','https://gateway.example/api/homestream/games/team-id']);assert.deepEqual(probes,[games[0].url]);
+});
+
+test('cross-origin and mismatched game media never reach the probe or Play readiness', async t => {
+ for (const url of ['https://upstream.example/live.m3u8','https://gateway.example/media/game/team-id/other','https://gateway.example/media/game/team-id/now?target=private']) {
+  let probes=0;
+  const h=harness(t,{read:async path=>path.pathname.endsWith('/teams')?[{id:'team-id',name:'Georgia Tech'}]:[{...games[0],url}],probe:async()=>{probes++;return 'ready';}});
+  h.ui.setEnabled(true);await tick();assert.equal(probes,0);assert.equal(h.ui.ready,null);assert.match(h.$('game-note').textContent,/could not load/);
+ }
 });
