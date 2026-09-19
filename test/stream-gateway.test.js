@@ -176,12 +176,12 @@ test('archive relay follows a cold-start redirect only to a configured redirect 
 });
 
 test('directory capabilities serve only validated plain names inside the sealed directory', async () => {
-  const f = fixture();
+  const f = fixture(); f.catalog.live.duke = { ...mediaTarget, url: 'https://audio.example/hls/live.m3u8' };
   const playlist = await streamGateway(req('/media/live/duke'), f.env, options(() => new Response('#EXTM3U\n#EXTINF:1,\nseg_1.ts\n#EXTINF:1,\nseg_2.ts\n', { headers: { 'Content-Type': 'application/vnd.apple.mpegurl' } })));
   const [first, second] = (await playlist.text()).split('\n').filter(l => l.startsWith('https://gateway.example/media/resource/'));
   const token = new URL(first).pathname.split('/')[3];
   const upstream = []; const fetcher = (url, init) => { upstream.push([init.method, url]); return audio(); };
-  for (const [path, expected] of [[`/media/resource/${token}/seg_1.ts`, 'https://audio.example/live?private=canary'.replace('live?private=canary', 'seg_1.ts')], [`/media/resource/${token}/seg_2.ts`, 'https://audio.example/seg_2.ts'], [`/media/resource/${token}/other_9.ts`, 'https://audio.example/other_9.ts']]) {
+  for (const [path, expected] of [[`/media/resource/${token}/seg_1.ts`, 'https://audio.example/hls/seg_1.ts'], [`/media/resource/${token}/seg_2.ts`, 'https://audio.example/hls/seg_2.ts'], [`/media/resource/${token}/other_9.ts`, 'https://audio.example/hls/other_9.ts']]) {
     const delivered = await streamGateway(new Request(`https://gateway.example${path}`), f.env, options(fetcher));
     assert.equal(delivered.status, 200, path); await delivered.arrayBuffer(); assert.equal(upstream.at(-1)[1], expected);
   }

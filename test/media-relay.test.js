@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { relayMedia, validateMediaTarget } from '../lib/media-relay.mjs';
+import { relayMedia, validateMediaTarget, directoryForm } from '../lib/media-relay.mjs';
 import { openMediaTarget, sealMediaTarget } from '../lib/media-token.mjs';
 const secret = Buffer.alloc(32, 17).toString('base64url');
 const target = { url: 'https://audio.example/live', allowedOrigins: ['https://audio.example'], kind: 'audio' };
@@ -68,7 +68,7 @@ test('HLS rewrite preserves timing, sequence, discontinuity, ranges and encrypts
 });
 test('HLS handles nested variants and rejects unsupported, malicious or oversized playlists', async () => {
   const good = '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",URI="alternate.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nchild.m3u8\n';
-  const relay = async body => relayMedia(request(), { ...target, kind: 'hls' }, { ...opts, fetcher: async () => new Response(body) });
+  const relay = async body => relayMedia(request(), { ...target, url: 'https://audio.example/hls/master.m3u8', kind: 'hls' }, { ...opts, fetcher: async () => new Response(body) });
   const text = await (await relay(good)).text();
   // Same-directory variants share the directory capability; their playlist purpose follows the .m3u8 name.
   const matches = [...text.matchAll(/\/media\/resource\/([\w-]+)\/([\w.-]+)/g)]; assert.equal(matches.length, 2);
@@ -218,4 +218,13 @@ test('directory capabilities reject non-directory scopes and malformed forms at 
   await assert.rejects(sealMediaTarget({ ...base, target: { url: 'https://a.example/d/', kind: 'resource', allowedOrigins: ['https://a.example'], scope: 'prefix' } }, secret), /Invalid media payload/);
   const ok = await sealMediaTarget({ ...base, target: { url: 'https://a.example/d/', kind: 'resource', allowedOrigins: ['https://a.example'], scope: 'directory' } }, secret);
   assert.equal((await openMediaTarget(ok, secret)).target.scope, 'directory');
+});
+test('an origin-root playlist never mints a directory capability', async () => {
+  const relay = async url => relayMedia(request(), { ...target, url, kind: 'hls' }, { ...opts, fetcher: async () => new Response('#EXTM3U\n#EXTINF:1,\nseg_1.ts\n') });
+  const root = (await (await relay('https://audio.example/index.m3u8')).text()).split('\n').find(l => l.startsWith('https://')).slice('https://gateway.example/media/resource/'.length);
+  assert.ok(!root.includes('/')); assert.equal((await openMediaTarget(root, secret, { now: 1000 })).target.url, 'https://audio.example/seg_1.ts');
+  const nested = (await (await relay('https://audio.example/live/index.m3u8')).text()).split('\n').find(l => l.startsWith('https://'));
+  assert.match(nested, /\/media\/resource\/[\w-]+\/seg_1\.ts$/);
+  assert.equal(directoryForm({ ...target, url: 'https://audio.example/index.m3u8', kind: 'hls' }), null);
+  assert.deepEqual(directoryForm({ ...target, url: 'https://audio.example/live/index.m3u8', kind: 'hls' }), { directory: 'https://audio.example/live/', name: 'index.m3u8' });
 });

@@ -41,7 +41,9 @@ export async function checkPlaylist(url, { signal, fetcher = fetch, sleep = wait
       const lines = text.split(/\r?\n/).map(line => line.trim());
       const index = lines.findIndex(line => line.startsWith('#EXT-X-STREAM-INF:'));
       const child = lines.slice(index + 1).find(line => line && !line.startsWith('#'));
-      const next = resourceURL(child);
+      // A master served through a directory capability names same-directory variants relatively.
+      let resolved = null; try { resolved = child && !/[\s\\]/.test(child) ? new URL(child, mediaEndpoint).href : null; } catch {}
+      const next = resourceURL(resolved);
       if (!next || depth === 3) throw Error('playlist-invalid');
       mediaEndpoint = next;
     }

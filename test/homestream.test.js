@@ -44,3 +44,13 @@ test('master traversal accepts the directory-capability playlist form and still 
   let count=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>{count++;return {ok:true,text:async()=>`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${bad}\n`};}}),'unavailable');assert.equal(count,1);
  }
 });
+test('master traversal resolves relative variants against a directory-capability endpoint only',async()=>{
+ const master=origin+'/media/resource/opaque-token/index.m3u8',requests=[];let sequence=10;
+ const fetcher=async address=>{requests.push(address);return {ok:true,text:async()=>address===url?`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${master}\n`:address===master?'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\naudio.m3u8\n':manifest(sequence++)};};
+ assert.equal(await checkPlaylist(url,{origin,sleep:async()=>{},fetcher}),'ready');
+ assert.deepEqual(requests,[url,master,origin+'/media/resource/opaque-token/audio.m3u8',origin+'/media/resource/opaque-token/audio.m3u8']);
+ for(const bad of ['../other.m3u8','sub/audio.m3u8','audio.m3u8?x=1','audio m3u8','//evil.example/a.m3u8']){
+  let count=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async address=>{count++;return {ok:true,text:async()=>address===url?`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${master}\n`:`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${bad}\n`};}}),'unavailable');assert.equal(count,2,bad);
+ }
+ let count=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>{count++;return {ok:true,text:async()=>'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nrelative.m3u8\n'};}}),'unavailable');assert.equal(count,1,'relative child at the public entry is not followed');
+});
