@@ -164,5 +164,13 @@ test('archive relay follows a cold-start redirect only to a configured redirect 
   assert.equal(blocked.status, 502); assert.ok(!(await blocked.text()).includes('store.example'));
   const other = fixture(); other.catalog.archiveConfig.redirectOrigins = { vt: ['https://store.example'] };
   assert.equal((await streamGateway(req('/media/archive/duke/recording'), other.env, options(redirecting(signed)))).status, 502);
-  assert.equal(configured.writes() + unconfigured.writes() + other.writes(), 0);
+  const ported = fixture(); ported.catalog.archiveConfig.redirectOrigins = { duke: ['https://store.example:8001'] };
+  const head = await streamGateway(req('/media/archive/duke/recording', { method: 'HEAD', headers: { Origin: origin } }), ported.env, options((url, init) => {
+    if (url === 'https://audio.example/replay/123.mp3') return new Response(null, { status: 302, headers: { Location: 'https://store.example:8001/replay/123.mp3?token=private' } });
+    assert.equal(init.method, 'HEAD'); assert.equal(url, 'https://store.example:8001/replay/123.mp3?token=private');
+    return new Response(null, { headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': '4', 'Accept-Ranges': 'bytes' } });
+  }));
+  assert.equal(head.status, 200); assert.equal(head.headers.get('Content-Length'), '4'); assert.equal(head.headers.get('Location'), null); assert.equal(await head.text(), '');
+  assert.equal((await streamGateway(req('/media/archive/duke/recording'), ported.env, options(redirecting(signed)))).status, 502);
+  assert.equal(configured.writes() + unconfigured.writes() + other.writes() + ported.writes(), 0);
 });
