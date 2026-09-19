@@ -176,3 +176,14 @@ test('missing media preserves sanitized 404 for unpublished HLS state', async ()
   const response = await relayMedia(request(), { ...target, kind: 'hls' }, { ...opts, fetcher: async () => new Response('https://audio.example/private', { status: 404, headers: { Location: 'https://audio.example/private' } }) });
   assert.equal(response.status, 404); assert.equal(await response.text(), 'Media unavailable'); assert.equal(response.headers.get('Location'), null);
 });
+test('HLS accepts the provider\'s basic-format timestamp offset and a one-second live window', async () => {
+  // Mirrors the Homestream media playlist observed on 2026-09-19: version 3, one-second segments, +0000 offsets, 350 entries.
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:1', '#EXT-X-MEDIA-SEQUENCE:583'];
+  for (let i = 0; i < 350; i++) lines.push(`#EXTINF:0.99845${i % 10},`, `#EXT-X-PROGRAM-DATE-TIME:2026-09-19T15:40:${String(i % 60).padStart(2, '0')}.490+0000`, `segment_${583 + i}.ts`);
+  const relay = async body => relayMedia(request(), { ...target, url: 'https://audio.example/live/index.m3u8', kind: 'hls' }, { ...opts, fetcher: async () => new Response(body) });
+  const response = await relay(lines.join('\n') + '\n');
+  assert.equal(response.status, 200); const text = await response.text();
+  assert.equal((text.match(/#EXT-X-PROGRAM-DATE-TIME:2026-09-19T15:40:\d{2}\.490\+0000/g) || []).length, 350);
+  assert.equal((text.match(/\/media\/resource\//g) || []).length, 350); assert.ok(!text.includes('audio.example'));
+  for (const bad of ['2026-09-19T15:40:22.490+00', '2026-09-19T15:40:22.490 +0000', '2026-09-19T15:40:22.490+00:0', '2026-09-19 15:40:22Z']) assert.equal((await relay(`#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:${bad}\n#EXTINF:1,\na.ts\n`)).status, 502);
+});
