@@ -11,9 +11,15 @@
   },
   "vars": {
     "ALLOWED_ORIGINS": "[\"https://michaeltorbert.github.io\"]",
-    "ENABLE_CATALOG_REFRESH": "false",
+    "ENABLE_CATALOG_REFRESH": "true",
     "MEDIA_STREAM_MODE": "native"
   },
+  "kv_namespaces": [
+    {
+      "binding": "STREAM_CATALOG",
+      "id": "15df52fc48424df487b2ac8ee96161f3"
+    }
+  ],
   "env": {
     "local": {
       "name": "homecall-metadata-local",
