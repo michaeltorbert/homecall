@@ -28,10 +28,11 @@ function harness(t,{delayTeams=false,duplicate=false,ageMs=0,requestMs=0,delayPl
   return delayPlays?new Promise(resolve=>resolvePlays=()=>resolve(value)):value;
  };
  Object.assign(w,{...mapping,metadataURL,createTimingFreshness:()=>createTimingFreshness({clock:()=>({wall:localNow,mono:localNow})}),nextPollDelay,browserTiming:async path=>{browserRequests.push(path);return readJSON(new URL('/api/'+path,'https://browser-provider.test'));},SyncPlayer:FakePlayer,readJSON,setupHomestream:callbacks=>(catalog={ready:null,setEnabled(v){this.ready=v?game:null;if(v){callbacks.onChange();callbacks.onReady()}},async refresh(){callbacks.onChange();callbacks.onReady()}})});
- w.eval(source+';window.setup=setupSync;');const ui=w.setup();w.document.getElementById('sync-timing-source').value=timingSource;return{ui,w,player,game,timers,requests,browserRequests,plays,recoverSchedule:()=>failSchedule=false,advance:ms=>localNow+=ms,fail:()=>failPlays=true,recover:()=>failPlays=false,resolvePlays:()=>resolvePlays(),get catalog(){return catalog},resolveTeams:x=>resolveTeams(x),$:id=>w.document.getElementById('sync-'+id)};
+ let liveStops=0;w.eval(source+';window.setup=setupSync;');const ui=w.setup({stopLive:()=>{liveStops++;}});w.document.getElementById('sync-timing-source').value=timingSource;return{ui,w,player,game,timers,requests,browserRequests,plays,liveStops:()=>liveStops,recoverSchedule:()=>failSchedule=false,advance:ms=>localNow+=ms,fail:()=>failPlays=true,recover:()=>failPlays=false,resolvePlays:()=>resolvePlays(),get catalog(){return catalog},resolveTeams:x=>resolveTeams(x),$:id=>w.document.getElementById('sync-'+id)};
 }
 test('Sync exposes all catalog schools, applies bounded clock and leaves outside requests unchanged',async t=>{
- const h=harness(t);h.ui.activate();await tick();assert.equal(h.$('team').options.length,4);h.$('play').click();await tick();
+ const h=harness(t);h.ui.activate();await tick();assert.equal(h.$('team').options.length,4);assert.equal(h.liveStops(),0);h.$('play').click();await tick();
+ assert.equal(h.liveStops(),1,'starting a game stream stops live radio');
  assert.equal(h.$('apply').disabled,false);h.$('quarter').value='1';h.$('clock').value='10:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));assert.equal(h.player.seeks.length,0);h.$('matches').children[0].click();assert.equal(h.player.seeks.at(-1),10);
  h.$('clock').value='12:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));assert.equal(h.player.seeks.length,1);assert.match(h.$('result').textContent,/outside/);
  h.ui.deactivate();assert.equal(h.player.active,false);

@@ -304,4 +304,4 @@ window.addEventListener('pagehide', () => { log.boundary('hidden', state); });
 setInterval(() => { if (active && state) log.heartbeat(state, !document.hidden && player.context?.state === 'running'); }, 30000);
 teamChanged(); refreshSessions(); render();
 
-setupArchive({ stopLive: disconnect, selectedTeam: () => selected, memory, sync: setupSync({ initialSchool: () => teams[selected].name }) });
+setupArchive({ stopLive: disconnect, selectedTeam: () => selected, memory, sync: setupSync({ initialSchool: () => teams[selected].name, stopLive: disconnect }) });

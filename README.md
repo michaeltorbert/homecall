@@ -62,7 +62,7 @@ The manual plan received available-seat agreement from Codex, Claude, Grok and G
 
 ## Archive
 
-Choose Archive, then a school, sport, and year. Native audio controls provide play/pause and a seekable timeline, with playback speed and fine position adjustments. Pause at a distinctive play, then resume when it appears in a TV replay. Switching school or leaving Archive stops the recording; opening Archive disconnects live audio. No scores are imported; provider titles may contain spoilers. Game recordings are not guaranteed to contain the complete game.
+Choose Archive, then a school, sport, and year. Native audio controls provide play/pause and a seekable timeline, with playback speed and fine position adjustments. Pause at a distinctive play, then resume when it appears in a TV replay. Switching school or leaving Archive stops the recording. Live radio keeps playing while you look at other tabs; starting a recording or a Sync game stream stops it, so only one call plays at a time. No scores are imported; provider titles may contain spoilers. Game recordings are not guaranteed to contain the complete game.
 
 Archive listings come from the gateway's private catalog. The Worker refreshes sources every six hours when its single publisher is enabled. Failed refreshes preserve the last good recordings and their original check time, marked stale. Successful empty listings replace old entries. Refresh list reloads that catalog without rebuilding the site. Builds perform no provider discovery and contain no recording addresses. Miami links to its official listening site.
 
@@ -97,8 +97,8 @@ See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for configuration, rollout gates an
 
 The separate **Sync** tab brings the timestamped prototype into Homecall for
 all schools returned by the public catalog (currently Duke, Georgia Tech,
-Virginia and Auburn). It stops Live/Archive playback when entered and unloads
-its own player and cancels timing requests when left. The original Live PCM
+Virginia and Auburn). Live radio keeps playing until a Sync game stream is
+started; Sync unloads its own player and cancels timing requests when left. The original Live PCM
 manual-delay controls remain separate and unchanged.
 
 Select a school/game, wait for feed verification, then Play. Sync shows the
