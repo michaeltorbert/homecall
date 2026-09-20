@@ -97,8 +97,8 @@ See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for configuration, rollout gates an
 
 The separate **Sync** tab brings the timestamped prototype into Homecall for
 all schools returned by the public catalog (currently Duke, Georgia Tech,
-Virginia and Auburn). It stops Live/Archive playback when entered and unloads
-its own player and cancels timing requests when left. The original Live PCM
+Virginia and Auburn). Live radio keeps playing until a Sync game stream is
+started; Sync unloads its own player and cancels timing requests when left. The original Live PCM
 manual-delay controls remain separate and unchanged.
 
 Select a school/game, wait for feed verification, then Play. Sync shows the
