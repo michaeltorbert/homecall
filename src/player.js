@@ -5,8 +5,9 @@ export class Player {
     this.onState = onState; this.onEvent = onEvent;
     this.epoch = 0; this.sequence = 0; this.pending = new Map(); this.state = null;
   }
-  async start(url, delay = 0, { hls = false } = {}) {
-    this.stop();
+  async start(url, delay = 0, { hls = false, recovery = null } = {}) {
+    recovery ||= { url, hls, delay, attempts: 0 };
+    this.stop(recovery);
     const epoch = this.epoch;
     const Context = window.AudioContext || window.webkitAudioContext;
     if (!Context || !window.AudioWorkletNode || !window.isSecureContext) throw new Error('unsupported');
@@ -14,7 +15,16 @@ export class Player {
     const audio = this.audio = new Audio();
     audio.crossOrigin = 'anonymous'; audio.preload = 'none'; audio.playsInline = true;
     const valid = () => epoch === this.epoch;
-    let gapPosition = null;
+    let gapPosition = null, connected = false;
+    const clearStall = () => { if (this.stallTimer) clearTimeout(this.stallTimer); this.stallTimer = null; };
+    const armStall = () => {
+      if (!valid() || !connected || this.stallTimer || this.state?.holding || (this.state?.paused && this.state?.restoring == null)) return;
+      this.stallTimer = setTimeout(() => {
+        this.stallTimer = null;
+        if (!valid() || this.mediaPlaying || context.state !== 'running' || this.state?.holding || (this.state?.paused && this.state?.restoring == null)) return;
+        this.recover(recovery);
+      }, 20000);
+    };
     const markGap = () => { if (gapPosition === null) gapPosition = Number.isFinite(audio.currentTime) ? audio.currentTime : NaN; };
     const ingestion = () => {
       const continuous = Number.isFinite(gapPosition) && Number.isFinite(audio.currentTime) && Math.abs(audio.currentTime - gapPosition) < 0.1;
@@ -38,15 +48,18 @@ export class Player {
 
     audio.onplaying = () => {
       if (!valid()) return;
-      this.mediaPlaying = true;
+      clearStall(); this.mediaPlaying = true;
       if (this.node && context.state === 'running') this.command('ingest', ingestion()).catch(() => {});
       this.onEvent('source-playing');
     };
     const interrupted = (kind) => {
       if (!valid()) return;
+      if (kind === 'source-paused') clearStall();
       markGap(); this.mediaPlaying = false;
       if (this.node) this.command('interrupt', kind === 'source-paused').catch(() => {});
       this.onEvent(kind);
+      if (['source-waiting', 'source-stalled'].includes(kind)) armStall();
+      if (connected && ['source-ended', 'source-error'].includes(kind)) this.recover(recovery);
     };
     audio.onwaiting = () => interrupted('source-waiting');
     audio.onstalled = () => { if (audio.readyState < 3) interrupted('source-stalled'); };
@@ -97,8 +110,42 @@ export class Player {
       if (!valid()) return;
       source.connect(node);
       if (valid()) await Promise.race([this.command('ingest', !!this.mediaPlaying), deadline]);
-    } catch (error) { if (valid()) this.stop(); throw error; }
+      if (valid()) { connected = true; if (!this.mediaPlaying) armStall(); }
+    } catch (error) { if (valid()) this.stop(recovery); throw error; }
     finally { clearTimeout(startupTimer); }
+  }
+  recover(session) {
+    if (session !== this.recovery || this.retryTimer) return;
+    const delay = this.state?.restoring ?? this.state?.resumeDelay ?? this.state?.delay ?? session.delay;
+    if (Number.isFinite(delay)) session.delay = delay;
+    // A held/paused listener or suspended phone must choose when to restart.
+    if (this.context?.state !== 'running' || this.state?.holding || (this.state?.paused && this.state?.restoring == null)) {
+      this.stop(); this.onEvent('source-reconnect-required'); this.onState(null); return;
+    }
+    this.scheduleRecovery(session);
+  }
+  scheduleRecovery(session) {
+    if (session !== this.recovery) return;
+    // New context/worklet discards every sample from the interrupted epoch.
+    this.stop(session);
+    if (session.attempts >= 3) {
+      this.stop(); this.onEvent('source-reconnect-exhausted'); this.onState(null); return;
+    }
+    const wait = 1000 * 2 ** session.attempts++;
+    this.onEvent('source-reconnecting');
+    this.retryTimer = setTimeout(async () => {
+      this.retryTimer = null;
+      if (session !== this.recovery) return;
+      try {
+        await this.start(session.url, session.delay, { hls: session.hls, recovery: session });
+        if (session === this.recovery) this.onEvent('source-reconnected');
+      } catch (error) {
+        if (session !== this.recovery) return;
+        if (error?.name === 'NotAllowedError') {
+          this.stop(); this.onEvent('source-reconnect-required'); this.onState(null);
+        } else this.scheduleRecovery(session);
+      }
+    }, wait);
   }
   command(type, value) {
     const id = ++this.sequence, epoch = this.epoch;
@@ -134,7 +181,9 @@ export class Player {
     } finally { clearTimeout(timer); }
   }
   setVolume(value) { this.volume = value; if (this.gain) this.gain.gain.value = value; }
-  stop() {
+  stop(recovery = null) {
+    if (this.stallTimer) clearTimeout(this.stallTimer); this.stallTimer = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer); this.retryTimer = null; this.recovery = recovery;
     ++this.epoch;
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('disconnected')); }
     this.pending.clear();

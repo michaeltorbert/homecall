@@ -1,4 +1,4 @@
-import { metadataURL } from './gateway.js';
+import { metadataURL, mediaURL } from './gateway.js';
 import { readJSON, checkPlaylist } from './homestream.js';
 const messages = {
   unpublished: 'This game’s feed has not been published. Refresh closer to the broadcast.',
@@ -35,7 +35,13 @@ export function setupHomestream({ onChange, onReady, read = readJSON, probe = ch
       if (!team) throw Error('team-unavailable');
       const loaded = await read(api(`homestream/games/${encodeURIComponent(team.id)}`), { signal });
       if (signal.aborted) return;
-      games = loaded;
+      if (!Array.isArray(loaded)) throw Error('catalog-invalid');
+      games = loaded.map(game => {
+        if (!game || !/^[A-Za-z0-9_-]+$/.test(game.id) || typeof game.opponent !== 'string' || !(game.start === null || Number.isFinite(game.start))) throw Error('catalog-invalid');
+        const url = game.url === null ? null : mediaURL(game.url, { origin: typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__, path: `/media/game/${team.id}/${game.id}` });
+        if (game.url !== null && !url) throw Error('catalog-invalid');
+        return { ...game, url };
+      });
       const current = games.find(g => g.id === previous) || [...games].filter(g => g.start !== null).sort((a,b) => Math.abs(a.start-Date.now())-Math.abs(b.start-Date.now()))[0] || games[0];
       $('game').replaceChildren();
       for (const g of games) {

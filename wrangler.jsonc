@@ -5,16 +5,71 @@
   "compatibility_date": "2026-09-12",
   "workers_dev": true,
   "preview_urls": false,
-  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
-  "vars": {
-    "ALLOWED_ORIGINS": "[\"https://michaeltorbert.github.io\"]"
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
   },
+  "vars": {
+    "ALLOWED_ORIGINS": "[\"https://michaeltorbert.github.io\"]",
+    "ENABLE_CATALOG_REFRESH": "true",
+    "MEDIA_STREAM_MODE": "native"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "STREAM_CATALOG",
+      "id": "15df52fc48424df487b2ac8ee96161f3"
+    }
+  ],
   "env": {
     "local": {
       "name": "homecall-metadata-local",
       "vars": {
-        "ALLOWED_ORIGINS": "[\"http://127.0.0.1:4178\",\"http://localhost:4178\",\"http://127.0.0.1:4179\",\"http://localhost:4179\"]"
+        "ALLOWED_ORIGINS": "[\"http://127.0.0.1:4178\",\"http://localhost:4178\",\"http://127.0.0.1:4179\",\"http://localhost:4179\"]",
+        "MEDIA_STREAM_MODE": "bounded"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "STREAM_CATALOG",
+          "id": "local-private-catalog"
+        }
+      ],
+      "triggers": {
+        "crons": []
+      }
+    },
+    "preview": {
+      "name": "homecall-private-streams-preview",
+      "vars": {
+        "ALLOWED_ORIGINS": "[\"https://michaeltorbert.github.io\",\"http://127.0.0.1:4178\",\"http://127.0.0.1:4179\",\"https://homecall-private-streams-preview.homecall.workers.dev\"]",
+        "ENABLE_CATALOG_REFRESH": "false",
+        "MEDIA_STREAM_MODE": "native"
+      },
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+      },
+      "kv_namespaces": [
+        {
+          "binding": "STREAM_CATALOG",
+          "id": "c8f03da2bcc044319673270407f822e0"
+        }
+      ],
+      "triggers": {
+        "crons": []
+      },
+      "assets": {
+        "directory": "./dist",
+        "run_worker_first": [
+          "/api/*",
+          "/media/*"
+        ],
+        "not_found_handling": "none"
       }
     }
+  },
+  "triggers": {
+    "crons": [
+      "17 */6 * * *"
+    ]
   }
 }

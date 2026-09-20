@@ -1,22 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTeams, normalizeGames, checkPlaylist, mediaURL } from '../src/homestream.js';
-import { homestreamCatalog } from '../lib/homestream-catalog.mjs';
-const team='410422f0-663f-4e3d-82e2-787d954ae29d',url='https://example.cloudfront.net/exact/stream.m3u8';
-const game={game_id:'one',game_type:'football',home_team_id:team,away_team_id:'other',home_cloudfront_url:url,away_cloudfront_url:'https://wrong.cloudfront.net/stream.m3u8',date:'2026-09-12',time:'23:00',timezone:'UTC',away_team_school_name:'Tennessee'};
+import { checkPlaylist, mediaURL } from '../src/homestream.js';
+const origin='https://gateway.example',url=origin+'/media/game/team/one';
 const manifest=(seq=10,ended=false)=>`#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${seq}\n#EXTINF:1,\nsegment_${seq}.ts\n${ended?'#EXT-X-ENDLIST':''}`;
-test('catalog resolves exact team and side; absent feeds stay unpublished and unrelated sports are excluded',()=>{
- assert.deepEqual(normalizeTeams({success:true,teams:[{team_id:team,school_name:' Georgia Tech '}]}),[{id:team,name:'Georgia Tech'}]);
- const games=normalizeGames({success:true,games:[game,{...game,game_id:'away',home_team_id:'other',away_team_id:team},{...game,game_id:'missing',home_cloudfront_url:null},{...game,game_type:'basketball'},{...game,home_team_id:'other'}]},team);
- assert.equal(games.length,3);assert.equal(games[0].url,url);assert.equal(games[1].url,game.away_cloudfront_url);assert.equal(games[2].url,null);
- assert.equal(games[0].start,Date.parse('2026-09-12T23:00:00Z'));assert.equal(games[0].opponent,'Tennessee');
-});
-test('invalid catalogs and unsafe media addresses are rejected',()=>{
- assert.throws(()=>normalizeTeams({success:false,teams:[]}));assert.throws(()=>normalizeGames({},team));
- for(const value of ['http://example.cloudfront.net/a.m3u8','https://example.cloudfront.net.evil.com/a.m3u8','https://user:secret@example.cloudfront.net/a.m3u8','https://localhost/a.m3u8'])assert.equal(mediaURL(value),null);
-});
 test('availability checks distinguish advancing, frozen, ended, missing and invalid media',async()=>{
- async function probe(items){return checkPlaylist(url,{sleep:async()=>{},fetcher:async()=>{const x=items.shift();return typeof x==='number'?{ok:false,status:x}:{ok:true,text:async()=>x};}})}
+ async function probe(items){return checkPlaylist(url,{origin,sleep:async()=>{},fetcher:async()=>{const x=items.shift();return typeof x==='number'?{ok:false,status:x}:{ok:true,text:async()=>x};}})}
  assert.equal(await probe([manifest(10),manifest(13)]),'ready');
  assert.equal(await probe([manifest(10),manifest(10)]),'stalled');
  assert.equal(await probe([manifest(10,true)]),'ended');
@@ -26,12 +14,43 @@ test('availability checks distinguish advancing, frozen, ended, missing and inva
 });
 test('canceling a playlist check cannot yield a ready obsolete source',async()=>{
  const c=new AbortController();
- await assert.rejects(checkPlaylist(url,{signal:c.signal,fetcher:async()=>({ok:true,text:async()=>manifest()}),sleep:async()=>{c.abort();throw c.signal.reason;}}),{name:'AbortError'});
+ await assert.rejects(checkPlaylist(url,{origin,signal:c.signal,fetcher:async()=>({ok:true,text:async()=>manifest()}),sleep:async()=>{c.abort();throw c.signal.reason;}}),{name:'AbortError'});
 });
-test('gateway permits only fixed anonymous catalog routes and returns minimized data',async()=>{
- const requests=[];const fetcher=async(u,o)=>{requests.push({u,o});return Response.json({success:true,games:[{...game,secret:'excluded'}]});};
- const data=await homestreamCatalog('/api/homestream/games/'+team,{fetcher});assert.equal(data[0].url,url);assert.equal(data[0].secret,undefined);
- assert.equal(requests[0].o.credentials,'omit');assert.ok(requests[0].u.endsWith('?game_type=football'));
- assert.equal(await homestreamCatalog('/api/homestream/games/https://evil.test',{fetcher}),null);
- assert.equal(await homestreamCatalog('/api/homestream/games/'+team+'?url=evil',{fetcher}),null);assert.equal(requests.length,1);
+
+test('public relay validation rejects upstream, wrong origin, credentials, query and malformed paths',()=>{
+ assert.equal(mediaURL(url,{origin}),url);
+ for(const value of ['https://upstream.example/live.m3u8',url+'?url=hidden',url+'#fragment',url.replace('gateway.example','evil.example'),url.replace('gateway.example','user:pass@gateway.example'),origin+'/media/game/team/../one',origin+'/media/game/team/%6fne']) assert.equal(mediaURL(value,{origin}),null);
+});
+test('invalid media causes no browser request',async()=>{
+ let requests=0;assert.equal(await checkPlaylist('https://upstream.example/live.m3u8',{origin,fetcher:async()=>{requests++}}),'unpublished');assert.equal(requests,0);
+});
+
+test('master traversal probes the same advancing relay media playlist twice',async()=>{
+ const child=origin+'/media/resource/opaque-token',requests=[];let sequence=10;
+ const result=await checkPlaylist(url,{origin,sleep:async()=>{},fetcher:async address=>{requests.push(address);return {ok:true,text:async()=>address===url?`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${child}\n`:manifest(sequence++)};}});
+ assert.equal(result,'ready');assert.deepEqual(requests,[url,child,child]);
+});
+test('master traversal rejects foreign/query children and stops after three descendants',async()=>{
+ for(const child of ['https://upstream.example/variant.m3u8',origin+'/media/resource/token?target=x']){
+  let requests=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>{requests++;return {ok:true,text:async()=>`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${child}\n`};}}),'unavailable');assert.equal(requests,1);
+ }
+ let requests=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>({ok:true,text:async()=>`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${origin}/media/resource/token${++requests}\n`})}),'unavailable');assert.equal(requests,4);
+});
+test('master traversal accepts the directory-capability playlist form and still rejects paths beyond it',async()=>{
+ const child=origin+'/media/resource/opaque-token/index.m3u8',requests=[];let sequence=10;
+ assert.equal(await checkPlaylist(url,{origin,sleep:async()=>{},fetcher:async address=>{requests.push(address);return {ok:true,text:async()=>address===url?`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${child}\n`:manifest(sequence++)};}}),'ready');
+ assert.deepEqual(requests,[url,child,child]);
+ for(const bad of [origin+'/media/resource/opaque-token/a/b.m3u8',origin+'/media/resource/opaque-token/..',origin+'/media/resource/opaque-token/index.m3u8?x=1',origin+'/media/resource/opaque-token/'+'x'.repeat(256)]){
+  let count=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>{count++;return {ok:true,text:async()=>`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${bad}\n`};}}),'unavailable');assert.equal(count,1);
+ }
+});
+test('master traversal resolves relative variants against a directory-capability endpoint only',async()=>{
+ const master=origin+'/media/resource/opaque-token/index.m3u8',requests=[];let sequence=10;
+ const fetcher=async address=>{requests.push(address);return {ok:true,text:async()=>address===url?`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${master}\n`:address===master?'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\naudio.m3u8\n':manifest(sequence++)};};
+ assert.equal(await checkPlaylist(url,{origin,sleep:async()=>{},fetcher}),'ready');
+ assert.deepEqual(requests,[url,master,origin+'/media/resource/opaque-token/audio.m3u8',origin+'/media/resource/opaque-token/audio.m3u8']);
+ for(const bad of ['../other.m3u8','sub/audio.m3u8','audio.m3u8?x=1','audio m3u8','//evil.example/a.m3u8']){
+  let count=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async address=>{count++;return {ok:true,text:async()=>address===url?`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${master}\n`:`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\n${bad}\n`};}}),'unavailable');assert.equal(count,2,bad);
+ }
+ let count=0;assert.equal(await checkPlaylist(url,{origin,fetcher:async()=>{count++;return {ok:true,text:async()=>'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nrelative.m3u8\n'};}}),'unavailable');assert.equal(count,1,'relative child at the public entry is not followed');
 });

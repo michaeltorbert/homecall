@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import { PlaybackMemory } from '../src/playback-memory.js';
 import { SessionLog } from '../src/session-log.js';
 import { teams, getSources } from '../src/teams.js';
+globalThis.__GATEWAY_ORIGIN__='https://gateway.example';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 const settle=()=>new Promise(r=>setImmediate(r));
@@ -81,8 +82,8 @@ test('a stale playing snapshot cannot erase a native pause awaiting recovery',as
 });
 
 test('failed GT startup refreshes catalog before retry and refuses a withdrawn feed',async t=>{
- const first={id:'game-one',url:'https://example.cloudfront.net/one.m3u8',opponent:'Tennessee'};
- const next={...first,url:'https://example.cloudfront.net/replacement.m3u8'};
+ const first={id:'game-one',url:'https://gateway.example/media/game/team/game-one',opponent:'Tennessee'};
+ const next={...first,url:'https://gateway.example/media/game/team/game-two'};
  let refreshed=0;
  const h=harness(t,callbacks=>({ready:first,stop(){},setEnabled(){},async refresh(){this.ready=null;callbacks.onChange();this.ready=++refreshed===1?next:null;callbacks.onReady()}}));
  h.$('team').value='gt';h.$('team').onchange();h.player.failNext=true;h.$('connect').click();await settle();
@@ -90,7 +91,7 @@ test('failed GT startup refreshes catalog before retry and refuses a withdrawn f
  h.player.failNext=true;h.$('connect').click();await settle();assert.equal(h.player.starts[1].url,next.url);assert.equal(refreshed,2);assert.equal(h.$('connect').disabled,true);
 });
 test('GT reconnect refreshes before Play and delay memory belongs to the selected game',async t=>{
- const game={id:'game-one',url:'https://example.cloudfront.net/one.m3u8',opponent:'Tennessee'};let refreshed=0;
+ const game={id:'game-one',url:'https://gateway.example/media/game/team/game-one',opponent:'Tennessee'};let refreshed=0;
  const h=harness(t,callbacks=>({ready:game,stop(){},setEnabled(){},async refresh(){refreshed++;callbacks.onChange();callbacks.onReady()}}));
  h.$('team').value='gt';h.$('team').onchange();h.$('connect').click();await settle();assert.equal(h.player.starts[0].delay,0);
  h.player.update({delay:7,resumeDelay:7,available:10,paused:false,ingesting:true,holding:false,restoring:null});
@@ -106,7 +107,7 @@ test('choosing a backup stops playback, resets delay and logs the actual source'
  assert.equal(h.$('delay').textContent,'0.00');assert.match(h.$('notice').textContent,/Press Play/);
  assert.match(h.$('official').href,/thevarsitynetwork/);
  h.$('connect').click();await settle();
- assert.equal(h.player.starts.at(-1).url,'https://img.leanstream.co/IM3501-MP3');
+ assert.equal(h.player.starts.at(-1).url,'https://gateway.example/media/live/duke-varsity');
  assert.equal(h.player.starts.at(-1).delay,0);
  h.$('preview').click();assert.equal(JSON.parse(h.$('export').value).sourceId,'duke-varsity');
  h.player.update({delay:7,available:20,paused:false,holding:false,ingesting:true,restoring:null});
@@ -148,4 +149,10 @@ test('backup controls and official links reset when changing teams',async t=>{
  h.$('connect').click();await settle();assert.equal(h.player.starts.at(-1).url,teams.miami.url);
  assert.equal(h.$('official').href,teams.miami.official);
  h.$('team').value='duke';h.$('team').onchange();assert.equal(h.$('feed').value,'duke-leanstream');
+});
+
+test('fixed relay playback starts synchronously within the click gesture', t => {
+ const h=harness(t);h.$('connect').click();
+ assert.equal(h.player.starts.length,1);
+ assert.equal(h.player.starts[0].url,'https://gateway.example/media/live/duke-leanstream');
 });

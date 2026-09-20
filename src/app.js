@@ -22,6 +22,8 @@ const log = new SessionLog({ storage, build, onWarning: text => { $('storage-war
 const notice = text => { $('notice').textContent = text; };
 const player = new Player(update, event => {
   if (!active) return;
+  if (event === 'source-reconnecting') connecting = true;
+  if (['source-reconnected', 'source-reconnect-required', 'source-reconnect-exhausted'].includes(event)) connecting = false;
   if (event === 'source-paused') sourcePaused = true;
   if (event === 'source-playing') {
     sourceStatus = 'Receiving audio'; log.add(event, {}, state);
@@ -31,6 +33,10 @@ const player = new Player(update, event => {
       'source-waiting': 'The source is buffering. Check alignment when it returns.',
       'source-stalled': 'The source stopped delivering data. Check alignment when it returns.',
       'source-paused': 'Your phone paused the source. Resume audio restores your saved delay; use the TV-paused option only if the picture stopped too.',
+      'source-reconnecting': 'Connection lost. Reconnecting to the same source and refilling your saved delay…',
+      'source-reconnected': 'Reconnected. Your saved delay is refilling; check alignment when audio returns.',
+      'source-reconnect-required': 'Playback needs your permission to resume. Press Play to reconnect with your saved delay.',
+      'source-reconnect-exhausted': 'The source could not reconnect after three attempts. Press Play to try again.',
       'source-ended': 'The source ended. Reconnect to start a fresh audio buffer.',
       'source-error': connectionHelp(),
       'context-restored': 'Phone audio returned. Restoring playback; check alignment.',
@@ -156,6 +162,7 @@ async function connect(useDemo = false) {
   refreshSessions(log.session.id); render();
   try {
     const url = useDemo ? (demo = demoURL()) : game ? game.url : source.url;
+    if (!url) throw Error('gateway-unavailable');
     const started = player.start(url, restoreDelay, { hls: !!game });
     if (useDemo && player.audio) player.audio.loop = true;
     await started;

@@ -6,6 +6,7 @@ import worker from '../worker/index.mjs';
 import { metadataURL, validateGatewayOrigin } from '../src/gateway.js';
 import { createTimingFreshness, nextPollDelay } from '../src/timing-freshness.js';
 import { spawnSync } from 'node:child_process';
+const catalog={schemaVersion:1,version:'test-v1',updatedAt:'2026-09-01T00:00:00Z',live:{fixture:{url:'https://audio.example/live',allowedOrigins:['https://audio.example'],kind:'audio'}},archive:{checkedAt:'2026-09-01T00:00:00Z',schools:{}},discovery:{homestreamBase:'https://discovery.example',mediaOrigins:['https://audio.example']}};
 const uuid = '410422f0-663f-4e3d-82e2-787d954ae29d';
 const upstream = url => {
   if (url.includes('/summary?')) return {header:{id:new URL(url).searchParams.get('event'),uid:`s:20~l:23~e:${new URL(url).searchParams.get('event')}`,league:{id:'23',slug:'college-football'},season:{year:2026},competitions:[{id:new URL(url).searchParams.get('event'),competitors:[{team:{id:'150'}},{team:{id:'356'}}]}]},drives:{previous:[],current:{plays:[]}}};
@@ -20,7 +21,7 @@ const fetcher = async url => Response.json(upstream(String(url)));
 test('shared router serves exactly five minimized route families and timing age in both deliveries', async () => {
   for (const target of ['/api/homestream/teams',`/api/homestream/games/${uuid}`,'/api/sync/teams','/api/sync/schedule/150/2026','/api/sync/plays/401856671']) {
     let wall = 100000;
-    const response = await metadataGateway(makeRequest(target), {fetcher, now:()=>wall++});
+    const response = await metadataGateway(makeRequest(target), {fetcher, catalog, now:()=>wall++});
     assert.equal(response.status,200);
     assert.equal(response.headers.get('Cache-Control'),'no-store');
     const data = await response.json();
