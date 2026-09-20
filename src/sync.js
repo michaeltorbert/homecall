@@ -5,7 +5,7 @@ import { readJSON } from './homestream.js';
 import { setupHomestream } from './homestream-ui.js';
 import { SyncPlayer } from './sync-player.js';
 import { schoolKey, footballSeason, matchEvent, availableAnchors, selectAnchors, gameOrder, playLabel } from './sync-mapping.js';
-export function setupSync({ initialSchool = () => 'Duke' } = {}) {
+export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } = {}) {
   const $ = id => document.getElementById(`sync-${id}`);
   const audio = $('audio'), player = new SyncPlayer(audio, text => { $('playback').textContent = text; });
   let active = false, teamsController, mappingController, pollTimer, plays = [], conflict = false, calibrationKey = null, selectionKey = null, snapshot = 0, timingReady = false;
@@ -116,7 +116,7 @@ export function setupSync({ initialSchool = () => 'Duke' } = {}) {
   $('play').onclick = () => {
     if (!catalog.ready) return;
     if (player.active) { catalog.refresh(); return; }
-    clearChoices(); player.start(catalog.ready.url); render();
+    stopLive(); clearChoices(); player.start(catalog.ready.url); render();
   };
   $('stop').onclick = () => { clearChoices(); player.stop(); $('playback').textContent = 'Stopped.'; render(); };
   $('incoming').onclick = () => { $('result').textContent = player.live() ? 'Moved to incoming audio. Check against your TV.' : 'No live audio window is available yet.'; };

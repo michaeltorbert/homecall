@@ -24,7 +24,8 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, orig
   function selectMode(next) {
     if (next === mode) return;
     mode = next;
-    stopLive(); stop(); sync?.deactivate();
+    // Leaving a tab keeps live radio playing; starting a recording or a game stream stops it.
+    stop(); sync?.deactivate();
     for (const name of modes) {
       $(`${name}-tab`).setAttribute('aria-selected', String(name === mode));
       $(`${name}-tab`).tabIndex = name === mode ? 0 : -1;
@@ -70,7 +71,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, orig
       detail.textContent = `${item.sport} · ${new Date(item.start).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'America/New_York' })} · ${item.kind}`;
       button.append(title, detail); button.setAttribute('aria-label', `Play ${title.textContent}, ${detail.textContent}`);
       button.onclick = () => {
-        stop(); current = item; replayKey = `${key}:${item.id}`; lastSaved = null; restoreAttempts = 0; playingStarted = false; failedRestoreAt = null; restorePosition = memory?.read('replay', replayKey)?.value ?? null; $('replay-player').hidden = false;
+        stopLive(); stop(); current = item; replayKey = `${key}:${item.id}`; lastSaved = null; restoreAttempts = 0; playingStarted = false; failedRestoreAt = null; restorePosition = memory?.read('replay', replayKey)?.value ?? null; $('replay-player').hidden = false;
         $('replay-title').textContent = title.textContent; $('replay-audio').src = item.url;
         audio.playbackRate = Number($('replay-speed').value);
         message('Loading recording…');

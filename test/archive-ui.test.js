@@ -18,12 +18,13 @@ function harness(t, fetcher, memory, sync) {
   setupArchive({stopLive:()=>{stops++;},selectedTeam:()=> 'duke',memory,sync,origin:"https://gateway.example"});
   return {$,audio,counts:()=>({stops,paused,loads,plays}),dom};
 }
-test('archive stops live audio, supports playback, filters and unloads when leaving or changing school',async t=>{
+test('archive keeps live audio across tabs, stops it when a recording starts, supports playback, filters and unloads when leaving or changing school',async t=>{
   const h=harness(t);await settle();
   h.$('archive-tab').click();
-  assert.equal(h.counts().stops,1);assert.equal(h.$('live-panel').hidden,true);
+  assert.equal(h.counts().stops,0);assert.equal(h.$('live-panel').hidden,true);
   assert.equal(h.$('archive-panel').hidden,false);assert.equal(h.$('archive-list').children.length,1);
   h.$('archive-list').querySelector('button').click();await settle();
+  assert.equal(h.counts().stops,1);
   assert.equal(h.audio.src,item.url);assert.equal(h.counts().plays,1);
   assert.equal(h.$('replay-player').hidden,false);
   h.$('archive-team').value='miami';h.$('archive-team').onchange();
@@ -130,10 +131,10 @@ test('unknown recording duration cannot block bookmarks after playback progresse
  h.audio.currentTime=3;h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.deepEqual(saved.at(-1),['replay','duke:one',3]);
 });
 
-test('Sync tab owns playback exclusively and keyboard navigation includes all three modes',async t=>{
+test('Sync tab activates without stopping live audio and keyboard navigation includes all three modes',async t=>{
  let activated=0,deactivated=0;const sync={activate(){activated++},deactivate(){deactivated++}};
  const h=harness(t,undefined,undefined,sync);await settle();h.$('sync-tab').click();
- assert.equal(activated,1);assert.equal(h.$('sync-panel').hidden,false);assert.equal(h.$('live-panel').hidden,true);assert.equal(h.$('archive-panel').hidden,true);assert.equal(h.counts().stops,1);
+ assert.equal(activated,1);assert.equal(h.$('sync-panel').hidden,false);assert.equal(h.$('live-panel').hidden,true);assert.equal(h.$('archive-panel').hidden,true);assert.equal(h.counts().stops,0);
  h.$('sync-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'archive-tab');assert.equal(h.$('sync-panel').hidden,true);assert.equal(deactivated,2);
  h.$('archive-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'live-tab');assert.equal(h.$('live-panel').hidden,false);
 });
