@@ -133,6 +133,29 @@ screen support is claimed. The metadata Worker must be deployed and configured b
 on static GitHub Pages. Local build and mock tests do not establish real browser
 playback or precise alignment.
 
+**Reconnects.** After a fatal stream error or 20 seconds of startup or
+buffering silence, Sync reconnects to the same broadcast up to three times
+(1, 2 and 4 seconds apart). The retry allowance renews only after 30 seconds of
+continuously observed media progress at the normal rate. Playing events, timers,
+frozen or jumping audio, pauses, seeks and buffering do not count, and any of
+them restarts the 30 seconds. While audio plays normally, Sync remembers the
+playing broadcast timestamp. After a reconnect it tries to return to that
+timestamp plus the real time spent disconnected, keeping your delay relative to
+the TV. It moves only when the reloaded HLS window contains that moment
+unambiguously, a fragment shared by both playlists proves the timeline is
+continuous, the incoming-edge delay is consistent, and the remembered position is
+under two minutes old. Otherwise audio continues from the incoming broadcast and
+the status says the earlier position could not be verified. Native-HLS browsers
+without exposed timestamps always use this manual fallback. You may briefly
+hear incoming audio before the return, and loading after the seek adds a short
+delay. Success is reported only after playback is observed at the restored
+position. Pressing Back/Ahead, Jump to incoming audio or a play choice, pausing,
+or touching or keyboard-operating the audio controls cancels a pending return.
+Phone lock-screen or media-session seek controls cannot be reliably detected
+during that short window. Always check alignment with your TV afterward; TV
+sync is not guaranteed. A reconnect also clears play choices already shown, but
+it keeps the timestamp offset and timing source.
+
 ## Gateway development and publishing
 
 See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for the current private catalog and relay configuration, tests and rollout gates.
