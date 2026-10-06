@@ -263,6 +263,16 @@ test('a later intentional playback change clears a completed recovery notice',()
  const c=restoreWith(frags(104,{start:500}));c.player.seek(510);c.audio.onplaying();assert.match(c.events.at(-1),/canceled the return/);
  c.player.seek(512);c.audio.onplaying();assert.equal(c.events.at(-1),'Playing. Check alignment with your TV.');
 });
+test('Jump to incoming cancels restoration once and the canceled notice survives the next generic playing',()=>{
+ const pending=rig();healthy(pending);reconnect(pending,52000);pending.clock.now=54000;publish(pending,frags(104,{start:500}));
+ assert.equal(pending.player.live(),true);assert.deepEqual(pending.assigned,[527]);
+ pending.audio.onplaying();assert.match(pending.events.at(-1),/canceled the return/);assert.deepEqual(pending.types(),['reconnecting','canceled']);
+ const issued=restoreWith(frags(104,{start:500}));assert.equal(issued.player.live(),true);assert.deepEqual(issued.assigned,[519,527]);
+ issued.audio.onplaying();assert.match(issued.events.at(-1),/canceled the return/);
+ const empty=rig();healthy(empty);reconnect(empty,52000);assert.equal(empty.player.live(),false,'no seekable window yet');
+ assert.deepEqual(empty.types(),['reconnecting','canceled']);empty.audio.onplaying();assert.match(empty.events.at(-1),/canceled the return/);
+ empty.clock.now=54000;update(empty,frags(104,{start:500}));assert.deepEqual(empty.assigned,[]);
+});
 test('a stale queued pause after a source switch is ignored while the new audio is playing',()=>{
  const h=rig();healthy(h);h.player.start('https://gateway.example/media/game/team/two');
  const count=h.events.length;h.audio.paused=false;h.audio.onpause();assert.equal(h.events.length,count,'no Audio paused status');

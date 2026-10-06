@@ -137,8 +137,8 @@ playback or precise alignment.
 buffering silence, Sync reconnects to the same broadcast up to three times
 (1, 2 and 4 seconds apart). The retry allowance renews only after 30 seconds of
 continuously observed media progress at the selected playback rate. Playing
-events, timers, frozen or jumping audio, pauses, seeks and buffering do not
-count, and any of them restarts the 30 seconds. While audio plays normally, Sync
+events and timers earn no credit. Frozen or jumping audio, pauses, seeks and
+buffering restart the 30 seconds. While audio plays normally, Sync
 remembers the playing broadcast timestamp. After a reconnect it tries to return to that
 timestamp plus the real time spent disconnected, keeping your delay relative to
 the TV. It moves only when the remembered and target timestamps, and the
@@ -155,9 +155,12 @@ briefly hear incoming audio before the return, and loading after the seek adds
 delay. Success is reported once the player reports reaching the restored
 position (a completed seek or qualified progress from it). That observes the
 position; it does not guarantee continued playback or lasting TV alignment.
-Pressing Back/Ahead, Jump to incoming audio or a play choice, pausing, or
-touching or keyboard-operating the audio controls cancels a pending return,
-including while waiting to reconnect. A later playback change also clears the
+While reconnected audio is loaded, pressing Back/Ahead, Jump to incoming audio
+or a play choice, pausing, or touching or keyboard-operating the audio controls
+cancels a pending return. While waiting to reconnect, the audio is unloaded and
+the in-page movement controls are disabled. Touching or keyboard-operating the
+audio controls still cancels the return, and Stop remains available. A later
+playback change also clears the
 completed recovery message. Phone lock-screen, media-session or accessibility
 seeks cannot be identified as yours during that short window. Such a seek may be
 overridden once by the return. Always check alignment with your TV afterward;

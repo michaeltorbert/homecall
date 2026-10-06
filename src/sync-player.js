@@ -3,7 +3,7 @@ import Hls from 'hls.js';
 const WATCHDOG_MS = 20000, RESTORE_DEADLINE_MS = 10000, SAMPLE_TTL_MS = 120000, RENEW_MS = 30000;
 // Per-connection handlers; private teardown clears them before its own pause()/load().
 const MEDIA_HANDLERS = ['onplaying', 'onwaiting', 'onstalled', 'onpause', 'onerror', 'onended', 'ontimeupdate', 'onseeking', 'onseeked', 'onloadedmetadata', 'oncanplay'];
-// Native-control keys that can move or pause audio. Our handler runs before the control acts.
+// Keys on the audio element that its native controls may use to move or pause audio.
 const CONTROL_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Spacebar', 'Enter']);
 const NOTICE = {
   reconnecting: 'Connection lost. Reconnecting to the same broadcast; your earlier position returns only if it can be verified.',
@@ -167,6 +167,7 @@ export class SyncPlayer {
   }
   #end(message) { this.stop(); this.onStatus(message); this.onRecovery({ type: 'stopped' }); }
   // Idempotent readiness check: wait for a loaded playlist and media metadata, then issue or settle once.
+  // Returns true only when this event issued a seek; false lets the caller continue its guarded observation.
   #attemptRestore() {
     if (this.restore?.phase !== 'pending') return false;
     if (!this.hls) { this.#settle('fallback', 'no-timestamps'); return false; }
@@ -271,7 +272,12 @@ export class SyncPlayer {
     if (this.session) this.#capture(this.session, position, this.now());
     return true;
   }
-  live() { this.#intent(); const ranges = this.timing().ranges; return ranges.length ? this.seek(Math.max(ranges.at(-1)[0],ranges.at(-1)[1]-3)) : false; }
+  // seek() owns the intent when a window exists; a second intent would erase the canceled notice.
+  live() {
+    const ranges = this.timing().ranges;
+    if (ranges.length) return this.seek(Math.max(ranges.at(-1)[0],ranges.at(-1)[1]-3));
+    this.#intent(); return false;
+  }
   stop() { this.session = null; this.#teardown(); this.audio.onpointerdown = this.audio.onkeydown = null; }
   #teardown() {
     for (const timer of ['stallTimer', 'startupTimer', 'retryTimer', 'deadlineTimer']) this.#clear(timer);
