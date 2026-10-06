@@ -1,17 +1,24 @@
 import Hls from 'hls.js';
 // Sync seeks the broadcaster's timestamped HLS window. Live's PCM delay engine is separate.
 const WATCHDOG_MS = 20000, RESTORE_DEADLINE_MS = 10000, SAMPLE_TTL_MS = 120000, RENEW_MS = 30000;
-const MEDIA_HANDLERS = ['onplaying', 'onwaiting', 'onstalled', 'onpause', 'onerror', 'onended', 'ontimeupdate', 'onseeking', 'onseeked', 'onloadedmetadata', 'oncanplay', 'onpointerdown', 'onkeydown'];
+// Per-connection handlers; private teardown clears them before its own pause()/load().
+const MEDIA_HANDLERS = ['onplaying', 'onwaiting', 'onstalled', 'onpause', 'onerror', 'onended', 'ontimeupdate', 'onseeking', 'onseeked', 'onloadedmetadata', 'oncanplay'];
 // Native-control keys that can move or pause audio. Our handler runs before the control acts.
 const CONTROL_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' ', 'Spacebar', 'Enter']);
 const NOTICE = {
   reconnecting: 'Connection lost. Reconnecting to the same broadcast; your earlier position returns only if it can be verified.',
+  reconnectingUnsampled: 'Connection lost. Reconnecting to the same broadcast.',
   restoring: 'Reconnected. Returning to your earlier position; you may briefly hear incoming audio.',
-  restored: 'Reconnected near your earlier position. Loading added a short delay; check alignment with your TV.',
-  fallback: 'Your earlier position could not be verified after reconnecting, so audio continues from the incoming broadcast. Check alignment with your TV and adjust manually.',
-  timestamps: 'This browser or feed does not expose broadcast timestamps, so audio continues from the incoming broadcast. Check alignment with your TV and adjust manually.',
+  restored: 'Returned near your earlier position after reconnecting. Loading added delay; check alignment with your TV.',
+  // Before any restoration seek is issued, HLS plays from its incoming default position.
+  fallback: 'Your earlier position could not be verified after reconnecting, so audio plays from the incoming broadcast. Check alignment with your TV and adjust manually.',
+  // After a seek was issued the position is unknown: it may be the earlier target or wherever HLS moved.
+  unconfirmed: 'The return to your earlier position could not be confirmed. Check the current audio against your TV and adjust manually.',
+  incoming: 'Audio resumes from the incoming broadcast. Check alignment with your TV and adjust manually.',
+  timestamps: 'This browser or feed does not expose complete broadcast timestamps, so audio plays from the incoming broadcast. Check alignment with your TV and adjust manually.',
   canceled: 'Your playback change canceled the return to your earlier position. Check alignment with your TV.',
 };
+const FALLBACK_NOTICE = { 'no-timestamps': NOTICE.timestamps, 'no-sample': NOTICE.incoming };
 
 const validFragment = f => Number.isInteger(f.sn) && Number.isInteger(f.cc) && Number.isFinite(f.start) &&
   Number.isFinite(f.duration) && f.duration > 0 && Number.isFinite(f.pdt);
@@ -29,20 +36,37 @@ function path(frags, ...indexes) {
   return frags.slice(from, to + 1);
 }
 // Half-open fragment spans; overlaps are ambiguous and gaps have no timestamp.
-function locatePosition(frags, position) {
-  const hits = frags.flatMap((f, index) => position >= f.start && position < f.start + f.duration ? [{ index, utc: f.pdt + (position - f.start) * 1000 }] : []);
-  return hits.length === 1 ? hits[0] : null;
+const coversPosition = (f, position) => position >= f.start && position < f.start + f.duration;
+const coversUTC = (f, utc) => utc >= f.pdt && utc < f.pdt + f.duration * 1000;
+function onlyIndex(frags, covers) {
+  const hits = frags.flatMap((f, index) => covers(f) ? [index] : []);
+  return hits.length === 1 ? hits[0] : -1;
+}
+// Both directions must identify the same single fragment. Tolerated adjacency rounding can make
+// one direction unique while its inverse lands in an overlap, so neither direction alone is enough.
+function mapPosition(frags, position) {
+  const index = onlyIndex(frags, f => coversPosition(f, position)), f = frags[index];
+  const utc = f && f.pdt + (position - f.start) * 1000;
+  return f && onlyIndex(frags, g => coversUTC(g, utc)) === index ? { index, utc } : null;
+}
+function mapUTC(frags, utc) {
+  const index = onlyIndex(frags, f => coversUTC(f, utc)), f = frags[index];
+  const position = f && f.start + (utc - f.pdt) / 1000;
+  return f && onlyIndex(frags, g => coversPosition(g, position)) === index ? { index, position } : null;
 }
 function locateUTC(snap, utc) {
-  const hits = snap.frags.flatMap((f, index) => utc >= f.pdt && utc < f.pdt + f.duration * 1000 ? [{ index, position: f.start + (utc - f.pdt) / 1000 }] : []);
-  return hits.length === 1 && snap.ranges.some(([a, b]) => hits[0].position >= a && hits[0].position < b) ? hits[0] : null;
+  const target = mapUTC(snap.frags, utc);
+  return target && snap.ranges.some(([a, b]) => target.position >= a && target.position < b) ? target : null;
 }
-const locateSeekable = (snap, position) => snap.ranges.some(([a, b]) => position >= a && position <= b) ? locatePosition(snap.frags, position) : null;
-// The clipped seekable endpoint. Only here may the terminal fragment's closed end be used.
+const locateSeekable = (snap, position) => snap.ranges.some(([a, b]) => position >= a && position <= b) ? mapPosition(snap.frags, position) : null;
+// The clipped seekable endpoint. Only here may the terminal fragment's closed end be used,
+// and only when no other fragment's closed span shares that endpoint position or UTC.
 function locateIncomingEdge(frags, ranges) {
-  const end = ranges.at(-1)[1], last = frags.at(-1);
-  if (Math.abs(last.start + last.duration - end) < 1e-6) return { index: frags.length - 1, utc: last.pdt + last.duration * 1000 };
-  return locatePosition(frags, end);
+  const end = ranges.at(-1)[1], index = frags.length - 1, last = frags[index];
+  if (Math.abs(last.start + last.duration - end) >= 1e-6) return mapPosition(frags, end);
+  const utc = last.pdt + last.duration * 1000;
+  const shared = frags.some((f, i) => i !== index && ((end >= f.start && end <= f.start + f.duration) || (utc >= f.pdt && utc <= f.pdt + f.duration * 1000)));
+  return shared ? null : { index, utc };
 }
 const sameFragment = (a, b) => Math.abs(a.pdt - b.pdt) <= 250 &&
   Math.abs(a.duration - b.duration) <= Math.min(0.25, 0.25 * Math.min(a.duration, b.duration));
@@ -55,8 +79,10 @@ function findBridge(sample, snap, targetIndex) {
     const at = index.get(old.sn);
     if (at === undefined) continue;
     if (!sameFragment(old, snap.frags[at])) return { reason: 'identity' };
+    // Once a bridge is proven, later shared fragments still need identity checks but not new paths.
+    if (found) continue;
     const before = path(sample.frags, sample.index, oldAt), after = path(snap.frags, at, targetIndex, snap.edge.index);
-    found ??= before && after && { relevant: [...before, ...after, sample.frags[sample.edge.index]] };
+    if (before && after) found = { relevant: [...before, ...after, sample.frags[sample.edge.index]] };
   }
   return found ?? { reason: 'continuity' };
 }
@@ -65,7 +91,7 @@ function planRestore(sample, snap, mono) {
   const elapsed = mono - sample.mono;
   if (!(elapsed >= 0 && elapsed <= SAMPLE_TTL_MS)) return { reason: 'expired' };
   const utc = sample.utc + elapsed, target = locateUTC(snap, utc);
-  if (!target) return { reason: 'outside-window' };
+  if (!target) return { reason: 'unmapped' };
   const bridge = findBridge(sample, snap, target.index);
   if (!bridge.relevant) return bridge;
   const toleranceMs = 2000 * Math.max(...bridge.relevant.map(f => f.duration)) + 1000;
@@ -81,8 +107,12 @@ export class SyncPlayer {
   get active() { return !!this.session; }
   start(url) {
     this.stop();
-    this.session = { url, attempts: 0, sample: null, restoring: false, notice: null };
-    this.#connect(this.session);
+    const session = this.session = { url, attempts: 0, sample: null, restoring: false, notice: null };
+    // Native-control gestures stay observed through private restarts and backoff until Stop or a new source.
+    const intent = () => { if (this.session === session) this.#intent(); };
+    this.audio.onpointerdown = intent;
+    this.audio.onkeydown = event => { if (CONTROL_KEYS.has(event?.key)) intent(); };
+    this.#connect(session);
   }
   #connect(session) {
     const epoch = this.epoch, audio = this.audio, status = text => this.onStatus(text);
@@ -106,15 +136,14 @@ export class SyncPlayer {
       if (connected && !userPaused && !this.stallTimer) this.stallTimer = setTimeout(on(() => { this.stallTimer = null; if (!userPaused) fail(); }), WATCHDOG_MS);
     });
     audio.onstalled = on(() => { if (audio.readyState < 3) audio.onwaiting?.(); });
-    audio.onpause = on(() => { userPaused = true; this.#clear('stallTimer'); this.#resetHealth(); status('Audio paused.'); this.#intent(); });
+    // A pause queued before this connection (for example by a source switch) is stale once audio plays again.
+    audio.onpause = on(() => { if (!audio.paused) return; userPaused = true; this.#clear('stallTimer'); this.#resetHealth(); status('Audio paused.'); this.#intent(); });
     // Native seeking also follows HLS's own seeks, so it resets health but never cancels restoration.
     audio.onseeking = on(() => this.#resetHealth());
     audio.onseeked = on(() => { if (!this.#attemptRestore()) this.#confirmRestore(); });
     audio.ontimeupdate = on(() => { if (!this.#attemptRestore()) this.#progress(session); });
     audio.onended = on(() => { this.#resetHealth(); status('The broadcast ended.'); });
     audio.onerror = on(fail);
-    audio.onpointerdown = on(() => this.#intent());
-    audio.onkeydown = on(event => { if (CONTROL_KEYS.has(event?.key)) this.#intent(); });
     if (Hls.isSupported()) {
       const hls = this.hls = new Hls({backBufferLength:350,maxBufferLength:30});
       hls.on(Hls.Events.ERROR, on((_, data) => { if (data.fatal) fail(); }));
@@ -132,7 +161,7 @@ export class SyncPlayer {
     const wait = 1000 * 2 ** session.attempts++;
     this.#teardown();
     // The last healthy sample stays frozen until a restart confirms or abandons restoration.
-    session.restoring = true; session.notice = NOTICE.reconnecting;
+    session.restoring = true; session.notice = session.sample ? NOTICE.reconnecting : NOTICE.reconnectingUnsampled;
     this.retryTimer = setTimeout(() => { this.retryTimer = null; if (this.session === session) this.#connect(session); }, wait);
     this.onStatus(session.notice); this.onRecovery({ type: 'reconnecting' });
   }
@@ -144,7 +173,7 @@ export class SyncPlayer {
     if (!this.session.sample) { this.#settle('fallback', 'no-sample'); return false; }
     const snap = this.#snapshot();
     if (!snap || !(this.audio.readyState >= 1)) return false;
-    if (!snap.valid) { this.#settle('fallback', 'no-timestamps'); return false; }
+    if (!snap.valid) { this.#settle('fallback', snap.reason); return false; }
     return this.#issue(planRestore(this.session.sample, snap, this.now()));
   }
   // Assignment only issues restoration; observed playback must confirm it.
@@ -171,18 +200,24 @@ export class SyncPlayer {
   #settle(type, reason) {
     const session = this.session;
     if (!session?.restoring) return;
+    const issued = this.restore?.phase === 'issued';
     session.restoring = false; this.restore = null; this.#clear('deadlineTimer');
     if (type !== 'restored') session.sample = null;
-    session.notice = reason === 'no-timestamps' ? NOTICE.timestamps : NOTICE[type];
+    session.notice = type !== 'fallback' ? NOTICE[type] : issued ? NOTICE.unconfirmed : FALLBACK_NOTICE[reason] ?? NOTICE.fallback;
     this.onStatus(session.notice); this.onRecovery({ type, reason });
   }
   // User movement or pause wins over restoration and invalidates the cached alignment sample.
+  // After a completed recovery, its notice no longer describes the position the user chose.
   #intent() {
-    if (!this.session) return;
-    this.session.sample = null;
-    this.#settle('canceled');
+    const session = this.session;
+    if (!session) return;
+    session.sample = null;
+    if (session.restoring) this.#settle('canceled');
+    else session.notice = null;
   }
   #progress(session) {
+    // A settle callback may already have stopped, replaced or failed this session.
+    if (session !== this.session || !this.health) return;
     const step = this.#advance();
     if (!step) return;
     if (this.health.healthyMs >= RENEW_MS) session.attempts = 0;
@@ -204,14 +239,15 @@ export class SyncPlayer {
     const snap = this.#snapshot(), at = snap?.valid && Number.isFinite(mono) ? locateSeekable(snap, position) : null;
     session.sample = at ? { utc: at.utc, mono, frags: snap.frags, index: at.index, edge: snap.edge } : null;
   }
-  // null while the playlist or seekable window is not loaded; valid only with complete fragment identity.
+  // null while the playlist or seekable window is not loaded. Invalid snapshots say whether identity or
+  // timestamps are missing, or present but out of order / without a unique incoming edge.
   #snapshot() {
     const list = this.hls?.latestLevelDetails?.fragments, ranges = this.timing().ranges;
     if (!list?.length || !ranges.length) return null;
     const frags = list.map(f => ({ sn: f.sn, cc: f.cc, start: f.start, duration: f.duration, pdt: f.programDateTime }));
-    const ordered = frags.every((f, i) => validFragment(f) && (!i || f.sn > frags[i - 1].sn));
-    const edge = ordered ? locateIncomingEdge(frags, ranges) : null;
-    return { frags, ranges, edge, valid: !!edge };
+    if (!frags.every(validFragment)) return { frags, ranges, valid: false, reason: 'no-timestamps' };
+    const edge = frags.every((f, i) => !i || f.sn > frags[i - 1].sn) ? locateIncomingEdge(frags, ranges) : null;
+    return edge ? { frags, ranges, edge, valid: true } : { frags, ranges, valid: false, reason: 'invalid-playlist' };
   }
   timing() {
     const utc = this.hls?.playingDate?.getTime(), position = this.audio.currentTime;
@@ -236,7 +272,7 @@ export class SyncPlayer {
     return true;
   }
   live() { this.#intent(); const ranges = this.timing().ranges; return ranges.length ? this.seek(Math.max(ranges.at(-1)[0],ranges.at(-1)[1]-3)) : false; }
-  stop() { this.session = null; this.#teardown(); }
+  stop() { this.session = null; this.#teardown(); this.audio.onpointerdown = this.audio.onkeydown = null; }
   #teardown() {
     for (const timer of ['stallTimer', 'startupTimer', 'retryTimer', 'deadlineTimer']) this.#clear(timer);
     ++this.epoch; this.restore = this.health = null;
