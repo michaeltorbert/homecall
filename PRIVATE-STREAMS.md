@@ -15,7 +15,97 @@ The document has `schemaVersion: 1`, a bounded `version` policy identifier, `upd
 - `archiveConfig`: `dukePlayer`, exact `dukeFeedPath`, `vtFeed`, and per-school `replayRules` entries `{origin, pathPrefix, filenamePattern}`. Optional per-school `redirectOrigins` lists exact HTTPS origins a replay host may redirect a cold request to (Virginia Tech answers a recording's first request with a signed redirect); redirects elsewhere still fail closed. Like a live source's `allowedOrigins`, an approved redirect origin is trusted for any path and for up to four hops among that school's approved origins; approving one is an administrator decision about that host, not about one recording.
 - `discovery`: `homestreamBase` and exact `mediaOrigins` approved from provider discovery. Newly introduced CDN origins fail closed until reviewed and configured.
 
-Change `version` to revoke resource capabilities after a policy change. Routine archive refresh keeps it stable. KV is eventually consistent; revocation may take propagation time. Public handlers never write KV. Successful unsigned game resolutions have a bounded 15-second in-memory cache; expired entries are not served on failure. KV is read on every request; a byte-identical document reuses its validated parse, so no policy change is ever served stale. The six-hour scheduled job is the sole publisher, enabled only with `ENABLE_CATALOG_REFRESH=true`. Pause its schedule and allow any bounded refresh to finish before administrative replacement; KV provides no atomic lock. Failed refreshes preserve per-school last-good data and check time. Successful empty listings are authoritative. Each run makes at most one write, with a two-minute source-work deadline and 5 MB document limit.
+Change `version` to revoke resource capabilities after a policy change. Routine archive refresh keeps it stable. KV is eventually consistent; revocation may take propagation time. Public handlers never write KV. Successful unsigned game resolutions have a bounded 15-second in-memory cache; expired entries are not served on failure. KV is read on every request; a byte-identical document reuses its validated parse, so no policy change is ever served stale. The Worker has a single configured six-hour schedule (`17 */6 * * *`), enabled only with `ENABLE_CATALOG_REFRESH=true`. Overlap is not excluded: duplicate delivery, a slow run meeting the next one, or an administrative upload can interleave, and KV provides no atomic lock or compare-and-swap. Each run makes at most one write, with a two-minute source-work deadline and 5 MB document limit. That deadline bounds source fetches, not the final KV read/write or the end of an old invocation. See **Archive refresh and recovery** below.
+
+## Archive refresh and recovery
+
+Each run reads and validates the stored document first. A missing or invalid document fails closed: no source request and no write. The first deployment therefore needs an administrator-provisioned catalog; the refresh never bootstraps or salvages one.
+
+Per school (Duke, Virginia Tech), inside that school's own attempt:
+
+- **Strict parse.** The refresh, and only the refresh, passes `{strict: true}` as the fifth `fetchArchive` argument. `createCatalog`, `fetchDukeSchedule`, live parsing and default parser calls keep their existing behavior.
+- **What strict mode ignores.** A strict parse still ignores rows that are not eligible recordings:
+  - rows with no advertised recording address (field absent, empty, or an empty/self-closing element);
+  - Duke rows whose explicit, well-formed sport ID is unsupported;
+  - rows with a valid future start.
+- **What strict mode rejects.** An eligible past recording is rejected if:
+  - its identity, start, Duke end, sport (a missing or malformed Duke sport ID; a VT sport-table miss) or labels are missing or malformed;
+  - any advertised address fails the school's replay rules (a rejected address never falls back to the other field);
+  - it conflicts with a duplicate ID (identical duplicates collapse);
+  - it sits in a recognized but malformed section, event or field (repeated, attributed or unclosed tags, wrong JSON collection types).
+
+  The feed itself must also be recognized. Duke needs a `previous_ev` or `archived_ev` element. Inside each such section only complete `<event>` blocks and whitespace are allowed, so a renamed event element or other leftover content is structural rather than an empty or partial list. VT needs an own `previous_ev` or `archived_ev` member, and a non-empty section needs its own `event` member. A missing or renamed container is structural, never an empty success. Empty forms count only inside a recognized section.
+
+  One rejected row fails that school's whole result, with one reviewed exception below.
+- **Reviewed source exclusions (explicit exception to the rule above).** The 2026-10-07 strict probe found one row per school, neither in retained history, whose two advertised addresses use the approved HTTPS origin and path but fail only the filename rule. Under the blanket rule, those two rows alone would have frozen both schools' lists (89 and 235 approved recordings) indefinitely. `lib/archive-source.mjs` therefore hardcodes one SHA-256 digest per school for exactly those full rows. Duke hashes the exact inner `<event>` XML; VT hashes `JSON.stringify` of the recursively key-sorted original event object, both as UTF-8. A row is excluded only if it:
+  - passed every other row, label, date and structure check;
+  - has every advertised address rejected (a mixed valid/rejected pair still fails);
+  - advertises both addresses, and each is a filename-only rejection: clean HTTPS, an approved origin and path prefix, a plain `.mp3` name;
+  - has an ID that is not in the school's currently retained list;
+  - matches its school's reviewed digest exactly. Any change to the row, its addresses or its shape no longer matches.
+
+  Further rules:
+  - Excluded rows are counted as `sourceExcluded`, are never published, and never appear in logs or diagnostics beyond that count.
+  - If a school's result would contain only excluded rows and no approved row, the school fails (`excludedOnly`) rather than publishing a fresh empty list.
+  - Every other policy-rejected row still fails the school.
+  - The URL policy, the stored-document validator, the default and live parsers and `createCatalog` are unchanged.
+  - Callers cannot supply exclusions: `fetchArchive` honors only `strict`, `counts` and `retainedIds`. The refresh passes the retained IDs.
+  - Adding or changing a digest requires a new reviewed exception.
+- **Candidate validation.** The fresh list is validated again: at most 5,000 items, unique IDs, valid dates, trimmed non-empty labels of 500 characters or fewer, and the school's replay rules. Stored-document acceptance is unchanged.
+- **Success.** A successful school gets `status: "ready"` and `checkedAt` set to this run's time. An empty success replaces old items.
+- **Failure.** A school with successful history (`ready` or `stale`, including an empty list) becomes `stale` and keeps its items and original `checkedAt`. A school without history stays `unavailable`. A legacy `ready` record without its own time inherits the old catalog's `archive.checkedAt` only if that time is not in the future. Otherwise, and for a legacy `stale` record without a time, the time stays absent and the site shows it as unknown. A failed or retained school is never stamped.
+- **Catalog time.** `archive.checkedAt` moves only when at least one school refreshed.
+
+Limits, accepted and documented rather than solved:
+
+- A single persistent bad eligible row keeps that school stale until the source or the private policy is corrected. Recordings stay playable.
+- A provider that renames a URL tag the parser does not know makes rows read as "no recording". This is a feed-contract limitation. The parser is bounded recognition of the known contract, not a general XML parser.
+- Overlapping writers are last-writer-wins on the whole document. A run that read an older document can drop another run's fresh school result or regress a school's check time. Tests characterize both. No recovery horizon is promised, and eventual consistency refers only to KV visibility; it does not heal lost updates.
+- Age warnings use the viewer's clock; they are a heuristic, not an authority.
+
+Refresh diagnostics: `refreshPrivateCatalog(env, {stats})` and `fetchArchive(..., {strict: true, counts, retainedIds})` fill caller-supplied objects with numeric per-school counts:
+
+- `rows`, `accepted`, `unsupported`, `future`, `unrecorded`, `duplicateIdentical`, `sourceExcluded`;
+- failing counts: `malformed`, `policyRejected`, `duplicateConflict`, `structural`, `excludedOnly`.
+
+`stats` also records a fixed `outcome` (`refreshed`, `retained` or `unavailable`) and a fixed `failure` (`rows`, `candidate` or `source`). The objects never contain addresses, titles or raw errors, and the scheduled job discards raw errors. A compatibility probe may print only these counts.
+
+### Recovering an old or stopped catalog
+
+There is no manual "refresh now" command or endpoint. **Refresh list** in the site only reloads the published catalog. The site warns once a school's list is more than 12 hours old.
+
+**Normal recovery (no upload):**
+
+1. Inspect the deployed Worker version and its configuration: `ENABLE_CATALOG_REFRESH` is `"true"` and the cron trigger is `17 */6 * * *`.
+2. If either is wrong, restore it from the reviewed `wrangler.jsonc` and redeploy.
+3. Wait for an observed scheduled invocation result.
+4. Verify per-school `status`/`checkedAt` through the public `/api/catalog/archive` projection. Never print the private document.
+
+A school that stays stale after a successful invocation is a source or policy problem; diagnose it with the redacted counts.
+
+**Administrative replacement** applies only when the KV document is missing or corrupt, or a reviewed policy change is needed. Before uploading:
+
+1. Pause the schedule (`ENABLE_CATALOG_REFRESH` `"false"`) and confirm that the *deployed* version is the disabled one.
+2. Obtain authoritative platform evidence that every relevant earlier scheduled invocation has completed.
+
+These do **not** prove quiescence:
+
+- a quiet log tail;
+- an elapsed slot or arbitrary wait;
+- a stable or matching digest;
+- a next-slot observation;
+- repeated re-uploads;
+- the refresh's fail-closed handling of a missing document, because an invocation that read a valid document before the loss can still write.
+
+If completion evidence is unavailable, **DO NOT UPLOAD.** Keep the private replacement and rollback files and use normal recovery if possible; otherwise stop and escalate.
+
+With evidence in hand:
+
+1. Validate the private file with `node scripts/validate-private-catalog.mjs <file>` and upload it.
+2. Re-enable the schedule.
+3. Verify through the public projection.
+
+Uploaded documents keep the actual source check times, including absent (unknown) ones. Never re-stamp `checkedAt` by hand; upload time is not a source check. A digest read-back after a permitted upload is only post-hoc detection of a concurrent write, not proof that none will follow. No universal safe emergency overwrite is claimed.
 
 ## Local checks
 

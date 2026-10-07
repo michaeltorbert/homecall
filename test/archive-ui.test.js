@@ -6,8 +6,9 @@ import { setupArchive } from '../src/archive.js';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const item={id:'one',opponent:'Tulane',sport:'Football',start:'2026-09-05T18:00:00Z',kind:'Game recording',url:'https://gateway.example/media/archive/duke/one'};
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-function harness(t, fetcher, memory, sync) {
+function harness(t, fetcher, memory, sync, {beforeSetup, ...options}={}) {
   const dom=new JSDOM(html,{url:'https://example.test/homecall/'});
+  beforeSetup?.(dom);
   t.mock.method(globalThis,'fetch',fetcher || (async()=>({ok:true,json:async()=>({checkedAt:'2026-09-11T00:00:00Z',schools:{duke:{status:'ready',source:'https://duke.leanplayer.com/',items:[item]},miami:{status:'external',source:'https://miamihurricanes.com/',items:[]},vt:{status:'ready',source:'https://hokiesports.com/',items:[]}}})})));
   const oldDocument=globalThis.document,oldOption=globalThis.Option;
   globalThis.document=dom.window.document; globalThis.Option=dom.window.Option;
@@ -15,7 +16,7 @@ function harness(t, fetcher, memory, sync) {
   const $=id=>document.getElementById(id), audio=$('replay-audio');
   let stops=0,paused=0,loads=0,plays=0;
   audio.pause=()=>{paused++;}; audio.load=()=>{loads++;};audio.play=async()=>{plays++;};
-  setupArchive({stopLive:()=>{stops++;},selectedTeam:()=> 'duke',memory,sync,origin:"https://gateway.example"});
+  setupArchive({stopLive:()=>{stops++;},selectedTeam:()=> 'duke',memory,sync,origin:"https://gateway.example",...options});
   return {$,audio,counts:()=>({stops,paused,loads,plays}),dom};
 }
 test('archive keeps live audio across tabs, stops it when a recording starts, supports playback, filters and unloads when leaving or changing school',async t=>{
@@ -131,6 +132,80 @@ test('unknown recording duration cannot block bookmarks after playback progresse
  h.audio.currentTime=3;h.audio.dispatchEvent(new h.dom.window.Event('timeupdate'));assert.deepEqual(saved.at(-1),['replay','duke:one',3]);
 });
 
+// Issue #4: stale, overdue and reload-failure notices. Only the note text changes over time.
+const CHECKED='2026-09-11T00:00:00.000Z',H=3600_000,M=60_000;
+const item2={...item,id:'two',sport:'Basketball',start:'2025-02-01T18:00:00Z',url:'https://gateway.example/media/archive/duke/two'};
+const docOf=(schools={},checkedAt=CHECKED)=>({checkedAt,schools:{duke:{status:'ready',source:'https://duke.leanplayer.com/',checkedAt:CHECKED,items:[item,item2]},miami:{status:'external',source:'https://miamihurricanes.com/',items:[]},vt:{status:'ready',source:'https://hokiesports.com/',checkedAt:CHECKED,items:[]},...schools}});
+const serve=(...docs)=>{let n=0;return async()=>{const d=docs[Math.min(n++,docs.length-1)];if(d instanceof Error)throw d;return {ok:true,json:async()=>structuredClone(d)};};};
+const local=at=>new Date(at).toLocaleString();
+function clocked(t,fetcher,start=Date.parse(CHECKED)+H){const clock={now:start,ticks:[]};const h=harness(t,fetcher,undefined,undefined,{now:()=>clock.now,every:fn=>clock.ticks.push(fn)});
+  let state='visible';Object.defineProperty(h.dom.window.document,'visibilityState',{configurable:true,get:()=>state});
+  return Object.assign(h,{clock,tick:()=>clock.ticks.forEach(fn=>fn()),visibility:value=>{state=value;h.dom.window.document.dispatchEvent(new h.dom.window.Event('visibilitychange'));},school:value=>{h.$('archive-team').value=value;h.$('archive-team').onchange();},note:()=>h.$('archive-note').textContent});}
+test('zero-total, filtered-empty, stale-empty, stale, external, unavailable and initial failure notices are distinct',async t=>{
+  const h=clocked(t,serve(docOf({vt:{status:'stale',source:'https://hokiesports.com/',checkedAt:CHECKED,items:[]}}),
+    docOf({vt:{status:'ready',source:'https://hokiesports.com/',checkedAt:CHECKED,items:[]},duke:{status:'stale',source:'https://duke.leanplayer.com/',checkedAt:CHECKED,items:[item]}}),
+    docOf({duke:{status:'unavailable',source:'https://duke.leanplayer.com/',items:[]}})));
+  await settle();h.$('archive-tab').click();
+  const reload=async()=>{h.$('archive-retry').click();await settle();};
+  const notes={initial:'The archive catalog could not load. Try again or visit the official site.'};
+  notes.ready=h.note();assert.equal(notes.ready,`2 recordings · Catalog checked ${local(CHECKED)}. Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`);
+  h.$('archive-sport').value='Football';h.$('archive-year').value='2025';h.$('archive-year').onchange();
+  notes.filtered=h.note();assert.equal(notes.filtered,`No recordings match these filters. Try another sport or year. Catalog checked ${local(CHECKED)}.`);assert.equal(h.$('archive-list').children.length,0);
+  h.school('vt');notes.staleEmpty=h.note();assert.equal(notes.staleEmpty,`The latest refresh failed. The last successful check found no recordings for Virginia Tech. Last checked ${local(CHECKED)}.`);
+  h.school('miami');notes.external=h.note();assert.match(notes.external,/aren’t available/);
+  await reload();h.school('duke');
+  notes.stale=h.note();assert.equal(notes.stale,`Showing previously checked recordings. The latest refresh failed. Last checked ${local(CHECKED)}.`);assert.equal(h.$('archive-list').children.length,1,'stale recordings stay playable');
+  h.school('vt');notes.zero=h.note();assert.equal(notes.zero,`No recordings are listed for Virginia Tech. Catalog checked ${local(CHECKED)}.`);
+  await reload();h.school('duke');notes.unavailable=h.note();assert.match(notes.unavailable,/couldn’t refresh Duke’s archive/);
+  assert.equal(new Set(Object.values(notes)).size,Object.keys(notes).length);
+});
+test('initial catalog failure keeps its own notice',async t=>{
+  const h=clocked(t,serve(Error('offline')));await settle();h.$('archive-tab').click();
+  assert.equal(h.note(),'The archive catalog could not load. Try again or visit the official site.');h.tick();assert.match(h.note(),/could not load/);
+});
+test('a stale school without its own time shows the time as unknown, never the newer catalog time; legacy ready uses the catalog time',async t=>{
+  const newer='2026-09-11T06:00:00.000Z';
+  const h=clocked(t,serve(docOf({duke:{status:'stale',source:'https://duke.leanplayer.com/',items:[item]},vt:{status:'ready',source:'https://hokiesports.com/',items:[{...item,id:'vt-one',url:'https://gateway.example/media/archive/vt/vt-one'}]}},newer)),Date.parse(newer)+H);await settle();h.$('archive-tab').click();
+  assert.equal(h.note(),'Showing previously checked recordings. The latest refresh failed. Last successful check time unknown.');assert.ok(!h.note().includes(local(newer)));assert.equal(h.$('archive-list').children.length,1);
+  h.school('vt');assert.equal(h.note(),`1 recordings · Catalog checked ${local(newer)}. Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`);
+});
+test('more than twelve hours old is conspicuous; aging updates only the note while visible and on return to the page',async t=>{
+  const h=clocked(t,serve(docOf()),Date.parse(CHECKED)+12*H);await settle();h.$('archive-tab').click();
+  h.$('archive-sport').value='Football';h.$('archive-sport').onchange();
+  const row=h.$('archive-list').firstElementChild,option=h.$('archive-sport').options[1];row.querySelector('button').click();
+  const before=h.counts(),src=h.audio.src,status=h.$('replay-status').textContent;
+  assert.ok(!/12 hours/.test(h.note()),'exactly twelve hours is not yet overdue');
+  h.visibility('hidden');h.clock.now+=1;h.tick();assert.ok(!/12 hours/.test(h.note()),'hidden pages are not updated by the timer');
+  h.visibility('visible');assert.match(h.note(),/^1 recordings · Catalog checked .*\. This list is more than 12 hours old; scheduled updates may have stopped\. Scores are omitted/);
+  h.clock.now+=H;h.tick();assert.match(h.note(),/more than 12 hours old/);
+  assert.equal(h.$('archive-list').firstElementChild,row);assert.equal(h.$('archive-sport').options[1],option);assert.equal(h.$('archive-sport').value,'Football');
+  assert.deepEqual(h.counts(),before);assert.equal(h.audio.src,src);assert.equal(h.$('replay-status').textContent,status);
+  h.$('archive-year').value='2025';h.$('archive-year').onchange();assert.match(h.note(),/^No recordings match these filters\. .*more than 12 hours old/,'filtered-empty keeps the time and warning');
+  h.school('vt');assert.match(h.note(),/^No recordings are listed for Virginia Tech\. .*more than 12 hours old/);
+});
+test('stale listings older than twelve hours carry the overdue warning',async t=>{
+  const s=clocked(t,serve(docOf({duke:{status:'stale',source:'https://duke.leanplayer.com/',checkedAt:CHECKED,items:[item]}})),Date.parse(CHECKED)+13*H);await settle();s.$('archive-tab').click();
+  assert.match(s.note(),/^Showing previously checked recordings\. The latest refresh failed\. Last checked .*\. This list is more than 12 hours old/);
+});
+test('inclusive five-minute future skew counts as current; beyond it freshness is unknown',async t=>{
+  const f=clocked(t,serve(docOf()),Date.parse(CHECKED)-5*M);await settle();f.$('archive-tab').click();assert.ok(!/freshness|12 hours/.test(f.note()));
+  f.clock.now-=1;f.tick();assert.match(f.note(),/Catalog checked .*\. Its freshness is unknown\. Scores/);assert.ok(f.note().includes(local(CHECKED)),'the timestamp itself is unchanged');
+});
+test('a failed reload keeps the loaded list with a caveat across school and filter changes until a reload succeeds',async t=>{
+  const h=clocked(t,serve(docOf(),Error('offline'),Error('offline'),docOf()));await settle();h.$('archive-tab').click();
+  h.$('archive-retry').click();await settle();
+  const caveat=/^Refresh list could not reach the catalog; showing the list loaded earlier\. 2 recordings · /;
+  assert.match(h.note(),caveat);assert.equal(h.$('archive-list').children.length,2);assert.equal(h.$('archive-retry').disabled,false);
+  h.school('vt');assert.match(h.note(),/^Refresh list could not reach the catalog; .*No recordings are listed for Virginia Tech/);
+  h.school('duke');h.$('archive-sport').value='Football';h.$('archive-sport').onchange();assert.match(h.note(),/^Refresh list could not reach the catalog; showing the list loaded earlier\. 1 recordings/);
+  h.tick();h.visibility('visible');assert.match(h.note(),/^Refresh list could not reach/);
+  h.$('archive-retry').click();await settle();assert.match(h.note(),/^Refresh list could not reach/,'a second failure keeps the caveat');
+  h.$('archive-retry').click();await settle();assert.match(h.note(),/^1 recordings · Catalog checked/);assert.equal(h.$('archive-sport').value,'Football');
+});
+test('the default aging timer runs every 60 seconds on the page window',async t=>{
+  const intervals=[];const h=harness(t,undefined,undefined,undefined,{beforeSetup:dom=>{dom.window.setInterval=(fn,ms)=>{intervals.push(ms);return 0;};}});await settle();
+  assert.deepEqual(intervals,[60_000]);assert.match(h.$('archive-note').textContent,/recordings · Catalog checked/);
+});
 test('Sync tab activates without stopping live audio and keyboard navigation includes all three modes',async t=>{
  let activated=0,deactivated=0;const sync={activate(){activated++},deactivate(){deactivated++}};
  const h=harness(t,undefined,undefined,sync);await settle();h.$('sync-tab').click();

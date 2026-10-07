@@ -7,7 +7,12 @@ execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy
 const config = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
 const bundle = readFileSync('output/worker-dry-run/index.js', 'utf8');
 const origin = 'https://michaeltorbert.github.io';
-const catalog={schemaVersion:1,version:'test-v1',updatedAt:'2026-09-01T00:00:00Z',live:{fixture:{url:'https://audio.example/live',allowedOrigins:['https://audio.example'],kind:'audio'}},archive:{checkedAt:'2026-09-01T00:00:00Z',schools:{}},discovery:{homestreamBase:'https://discovery.example',mediaOrigins:['https://audio.example']}};
+// SYNTHETIC archive sources for the scheduled refresh: Duke answers, VT is offline.
+const archivedAt='2026-09-01T00:00:00.000Z';
+const archiveRecord=(school,id,path)=>({source:'https://school.example/',status:'ready',checkedAt:archivedAt,items:[{id,opponent:'Visitor',sport:'Football',start:archivedAt,url:`https://audio.example/${path}/0.mp3`,kind:'Game recording'}]});
+const catalog={schemaVersion:1,version:'test-v1',updatedAt:'2026-09-01T00:00:00Z',live:{fixture:{url:'https://audio.example/live',allowedOrigins:['https://audio.example'],kind:'audio'}},archive:{checkedAt:archivedAt,schools:{duke:archiveRecord('duke','d0','replay'),vt:archiveRecord('vt','v0','vt')}},
+  archiveConfig:{dukePlayer:'https://archive-player.example/',dukeFeedPath:'/previous.xml',vtFeed:'https://archive-feed.example/vt',replayRules:{duke:[{origin:'https://audio.example',pathPrefix:'/replay/',filenamePattern:'^\\d+\\.mp3$'}],vt:[{origin:'https://audio.example',pathPrefix:'/vt/',filenamePattern:'^\\d+\\.mp3$'}]}},
+  discovery:{homestreamBase:'https://discovery.example',mediaOrigins:['https://audio.example']}};
 const uuid = '410422f0-663f-4e3d-82e2-787d954ae29d';
 let calls = 0;
 let streamClosed = false;
@@ -21,6 +26,10 @@ const upstream = async request => {
   const url = new URL(request.url);
   assert.equal(request.headers.get('Authorization'), null);
   assert.equal(request.headers.get('Cookie'), null);
+  if (url.hostname === 'archive-player.example') return new FixtureResponse(url.pathname === '/previous.xml'
+    ? '<main><events><previous_ev><event><id>d1</id><start_timestamp>1788645600</start_timestamp><end>2026-09-06 21:00:00</end><sport_id>1</sport_id><opponent>Visitor</opponent><archive_url>https://audio.example/replay/1.mp3</archive_url></event></previous_ev></events></main>'
+    : 'previous: "https://archive-player.example/previous.xml"');
+  if (url.hostname === 'archive-feed.example') return new FixtureResponse('unavailable', { status: 503 });
   if (url.hostname === 'audio.example') return new FixtureResponse(new Uint8Array([73,68,51,0,1,2]), {headers:{'Content-Type':'audio/mpeg','Location':'https://audio.example/private','Set-Cookie':'private=1'}});
   if (url.searchParams.get('event') === '2') return FixtureResponse.redirect('https://unexpected.invalid/redirect');
   if (url.hostname === 'unexpected.invalid') throw Error('A redirect must never be followed');
@@ -55,7 +64,7 @@ const mf = new Miniflare({
   workers: [
     { config: { name: 'gateway', type: 'worker', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'index.js', modules: { 'index.js': { type: 'esm', contents: bundle } } },
-      env: { MEDIA_STREAM_MODE: {type:'text',value:'native'}, ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS }, STREAM_CATALOG: {type:'kv',id:'fixture-catalog'} }
+      env: { MEDIA_STREAM_MODE: {type:'text',value:'native'}, ENABLE_CATALOG_REFRESH: {type:'text',value:'true'}, ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS }, STREAM_CATALOG: {type:'kv',id:'fixture-catalog'} }
     }, dev: { outboundService: { type: 'fetcher', handler: upstream } } },
     { config: { name: 'cancel-probe', type: 'worker', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'index.js', modules: { 'index.js': { type: 'esm', contents: bundle } } },
@@ -151,7 +160,21 @@ try {
   const probe = await mf.getWorker('reader-probe');
   const runtime = await (await probe.fetch('https://probe.invalid')).json();
   assert.deepEqual(runtime, {timeout:true,cancelled:true,cache:'no-store',credentials:'omit',redirect:'manual',combinedSignal:true});
+  // Scheduled refresh in workerd: Duke refreshes, offline VT keeps its validated list and original time.
+  assert.deepEqual(config.triggers.crons, ['17 */6 * * *'], 'production has one configured schedule');
+  const gateway = await mf.getWorker('gateway');
+  assert.equal((await gateway.scheduled({ cron: config.triggers.crons[0], scheduledTime: new Date() })).outcome, 'ok');
+  let stored = await kv.get('catalog');
+  for (let i = 0; i < 100 && stored === JSON.stringify(catalog); i++) { await new Promise(resolve => setTimeout(resolve, 20)); stored = await kv.get('catalog'); }
+  const refreshed = JSON.parse(stored);
+  assert.equal(refreshed.version, catalog.version);
+  assert.deepEqual([refreshed.archive.schools.duke.status, refreshed.archive.schools.duke.items.map(i => i.id)], ['ready', ['d1']]);
+  assert.ok(Date.parse(refreshed.archive.schools.duke.checkedAt) > Date.parse(archivedAt));
+  assert.deepEqual([refreshed.archive.schools.vt.status, refreshed.archive.schools.vt.checkedAt, refreshed.archive.schools.vt.items.map(i => i.id)], ['stale', archivedAt, ['v0']]);
+  const archiveText = await (await request('/api/catalog/archive')).text(), archive = JSON.parse(archiveText);
+  assert.deepEqual([archive.schools.vt.status, archive.schools.vt.checkedAt, new URL(archive.schools.vt.items[0].url).pathname], ['stale', archivedAt, '/media/archive/vt/v0']);
+  for (const leaked of ['audio.example', 'archive-player.example', 'archive-feed.example', 'school.example']) assert.ok(!archiveText.includes(leaked), leaked);
   console.log(JSON.stringify({ result: 'PASS', workerd: JSON.parse(readFileSync('node_modules/workerd/package.json')).version,
-    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'six HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'synthetic live scoreboard in the unchanged schema 1 status envelope','per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility'],
+    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'six HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'synthetic live scoreboard in the unchanged schema 1 status envelope','per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility', 'scheduled refresh: per-school last-known-good retention with original time and concealed projection'],
     limitation: 'Local workerd with fixture upstreams; no deployed cache, platform CPU, browser HLS or account entitlement proof.' }, null, 2));
 } finally { await mf.dispose(); }

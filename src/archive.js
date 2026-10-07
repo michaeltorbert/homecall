@@ -1,7 +1,7 @@
 import { metadataURL, configuredGatewayOrigin, gatewayOptions } from './gateway.js';
 import { teams } from './teams.js';
-import { filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
-export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowPlaying = null, origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal }) {
+import { catalogFreshness, filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
+export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowPlaying = null, origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal, now = () => Date.now(), every = fn => document.defaultView?.setInterval(fn, 60_000) }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
   let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
@@ -54,6 +54,33 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowP
     $(id).replaceChildren(new Option(label, ''), ...values.map(value => new Option(value, value)));
     if (values.includes(previous)) $(id).value = previous;
   }
+  const age = at => ({ old: ' This list is more than 12 hours old; scheduled updates may have stopped.', unknown: ' Its freshness is unknown.' })[catalogFreshness(at, now())] || '';
+  function note() {
+    const key = $('archive-team').value, team = teams[key], source = catalog?.schools[key];
+    if (!catalog) return catalogError ? 'The archive catalog could not load. Try again or visit the official site.' : 'Loading recordings…';
+    // A failed reload keeps the list loaded earlier; say so until a current reload succeeds.
+    const caveat = catalogError ? 'Refresh list could not reach the catalog; showing the list loaded earlier. ' : '';
+    if (source?.status === 'unavailable') return `${caveat}We couldn’t refresh ${team.name}’s archive. Try the official site below.`;
+    if (source?.status === 'external') return `${caveat}In-app recordings aren’t available for ${team.name} yet. Visit the official site for listening options.`;
+    const all = source?.items || [], count = filterReplays(all, $('archive-sport').value, $('archive-year').value).length;
+    if (source?.status === 'stale') {
+      // A stale school's time is only its own last successful check, never the catalog's.
+      const checked = source.checkedAt ? `Last checked ${new Date(source.checkedAt).toLocaleString()}.${age(source.checkedAt)}` : 'Last successful check time unknown.';
+      if (!all.length) return `${caveat}The latest refresh failed. The last successful check found no recordings for ${team.name}. ${checked}`;
+      return `${caveat}Showing previously checked recordings. The latest refresh failed.${count ? '' : ' No recordings match these filters.'} ${checked}`;
+    }
+    const at = source?.checkedAt || catalog.checkedAt, checked = `Catalog checked ${new Date(at).toLocaleString()}.${age(at)}`;
+    if (!all.length) return `${caveat}No recordings are listed for ${team.name}. ${checked}`;
+    if (!count) return `${caveat}No recordings match these filters. Try another sport or year. ${checked}`;
+    return `${caveat}${count} recordings · ${checked} Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`;
+  }
+  // Only the note changes here, never the list, filters or audio.
+  function renderNote() {
+    const text = note();
+    if ($('archive-note').textContent !== text) $('archive-note').textContent = text;
+  }
+  every(() => { if (document.visibilityState !== 'hidden') renderNote(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') renderNote(); });
   function render(reset = false) {
     const key = $('archive-team').value, team = teams[key], source = catalog?.schools[key];
     $('archive-official').href = source?.source || team.official;
@@ -65,9 +92,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowP
     }
     const items = filterReplays(source?.items || [], $('archive-sport').value, $('archive-year').value);
     $('archive-list').replaceChildren();
-    $('archive-note').textContent = !catalog ? (catalogError ? 'The archive catalog could not load. Try again or visit the official site.' : 'Loading recordings…') : source?.status === 'unavailable' ? `We couldn’t refresh ${team.name}’s archive. Try the official site below.` : source?.status === 'external' ? `In-app recordings aren’t available for ${team.name} yet. Visit the official site for listening options.` : `${items.length} recordings · Catalog checked ${new Date(source?.checkedAt || catalog.checkedAt).toLocaleString()}. Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`;
-    if (source?.status === 'stale') $('archive-note').textContent = `Showing previously checked recordings. The latest refresh failed. Last checked ${new Date(source.checkedAt || catalog.checkedAt).toLocaleString()}.`;
-    if (source?.status === 'ready' && !items.length) $('archive-note').textContent = 'No recordings match these filters. Try another sport or year.';
+    renderNote();
     for (const item of items) {
       const li = document.createElement('li'), button = document.createElement('button');
       const title = document.createElement('strong'), detail = document.createElement('span');
@@ -145,7 +170,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowP
       const data = validateCatalog(await response.json(), { origin, allowLocal });
       if (mine !== loadGeneration) return;
       catalog = data; catalogError = false; render();
-    } catch { if (mine === loadGeneration) { catalogError = true; $('archive-note').textContent = 'The archive catalog could not load. Try again or visit the official site.'; } }
+    } catch { if (mine === loadGeneration) { catalogError = true; renderNote(); } }
     finally { if (mine === loadGeneration) $('archive-retry').disabled = false; }
   }
   $('archive-retry').onclick = load;
