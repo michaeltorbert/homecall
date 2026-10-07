@@ -57,7 +57,20 @@ GitHub Pages was enabled with GitHub Actions by the user on September 10, 2026; 
   - 404 for unsupported teams.
 
   If upstream refusal returns, every label shows Status unavailable (safe, but no value). No browser fallback or access-denial workaround.
-- **NAV-320-01 (open, existing UI; issue #24)**: At 320px the mode tabs (Live/Sync/Archive) overflow. The Archive tab's right edge measured 340px in fixture Chrome during issue #10 checks, and on October 7 the current production site at 320 × 844 measured a document width of 340px (375px fits). Issue #24 owns the separate fix; no style change is made with these documentation updates. The cause is the unchanged navigation CSS (`min-width:100px` per tab, gaps and padding in `style.css`), not the status change; the Sync game select, status labels and help text stayed inside their container. Repair the narrow navigation in a separate change. Until then, no whole-page 320px overflow acceptance is claimed. Native dropdown/open-picker appearance remains unverified (STATUS-01, VISUAL-01).
+- **NAV-320-01 (issue #24; implementation record as of October 7, 2026)**: At 320px the mode tabs (Live/Sync/Archive) overflowed. The Archive tab's right edge measured 340px in fixture Chrome during issue #10 checks, and on October 7 the production site at 320 × 844 measured a document width of 340px (375px fit). The cause is the navigation CSS (`min-width:100px` per tab, gaps and padding in `style.css`), not the status change.
+  - *Change:* one narrow `style.css` rule. Below 364px the tabs share the row equally (`flex:1 1 0;min-width:0`) with 8px inline padding. Markup, handlers, labels, order, the 46px height, colors, and the selected, hover and focus styles are unchanged.
+  - *Bounded real-Chrome checks of the authored tree (October 7):*
+    - At 320 × 844 in all three modes the document width was 320px and the tabs were 85.33/85.34px wide and 46px tall.
+    - With a classic scrollbar (305px layout width) the labels and focus rings also fit.
+    - At 375 and 430 the viewport pixels were unchanged. At 1280 a stable capture matched the original-source CSS.
+    - The 339, 340, 363, 364 and 374px boundary checks were run.
+    - The existing tests, the existing workerd tests, the production-gateway build and the structural privacy check passed.
+  - *Limits of those checks:*
+    - Full-page captures differ by the expected footer build identifier (`8e84449` vs `8e84449-dirty`), so they are not total pixel identity.
+    - Metadata was a controlled 503 with a frozen public catalog. Demo and browser functionality are bounded checks, not provider, audio or native evidence.
+  - *Pending at this snapshot:* the final independent Sol review, CI and release. Issue #24 tracks the current release and closure status.
+  - *Out of scope:* the existing hover-over-selected color and the header/navigation inset difference are intentionally preserved. They are not deferred fixes.
+  - This does not close #12, #19 or VISUAL-01. Native dropdown/open-picker and native-device appearance remain unverified (STATUS-01, VISUAL-01).
 
 ## Now Playing metadata (issue #19)
 
