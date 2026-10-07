@@ -7,7 +7,8 @@ import { SyncPlayer } from './sync-player.js';
 import { schoolKey, footballSeason, matchEvent, availableAnchors, selectAnchors, gameOrder, playLabel } from './sync-mapping.js';
 export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } = {}) {
   const $ = id => document.getElementById(`sync-${id}`);
-  const audio = $('audio'), player = new SyncPlayer(audio, text => { $('playback').textContent = text; });
+  // A reconnect moves the HLS timeline: old play choices expire; offset, calibration and timing source stay.
+  const audio = $('audio'), player = new SyncPlayer(audio, text => { $('playback').textContent = text; }, { onRecovery: () => { clearChoices(); render(); } });
   let active = false, teamsController, mappingController, pollTimer, plays = [], conflict = false, calibrationKey = null, selectionKey = null, snapshot = 0, timingReady = false;
   const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
   const freshness = createTimingFreshness();

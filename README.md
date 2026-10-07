@@ -133,6 +133,40 @@ screen support is claimed. The metadata Worker must be deployed and configured b
 on static GitHub Pages. Local build and mock tests do not establish real browser
 playback or precise alignment.
 
+**Reconnects.** After a fatal stream error or 20 seconds of startup or
+buffering silence, Sync reconnects to the same broadcast up to three times
+(1, 2 and 4 seconds apart). The retry allowance renews only after 30 seconds of
+continuously observed media progress at the selected playback rate. Playing
+events and timers earn no credit. Frozen or jumping audio, pauses, seeks and
+buffering restart the 30 seconds. While audio plays normally, Sync
+remembers the playing broadcast timestamp. After a reconnect it tries to return to that
+timestamp plus the real time spent disconnected, keeping your delay relative to
+the TV. It moves only when the remembered and target timestamps, and the
+incoming edge, each map to exactly one fragment in both directions (timestamp to
+audio position and back) inside the reloaded seekable window. A fragment shared
+by both playlists must also prove the timeline is continuous, the incoming-edge
+delay must be consistent, and the remembered position must be under two minutes
+old. If no return is attempted, audio plays from the incoming broadcast and the
+status says so. If a return was attempted but could not be confirmed, the status
+makes no claim about where audio is; check it against the TV. A session that
+never played verifiably simply resumes from the incoming broadcast. Native-HLS
+browsers without exposed timestamps always use the manual fallback. You may
+briefly hear incoming audio before the return, and loading after the seek adds
+delay. Success is reported once the player reports reaching the restored
+position (a completed seek or qualified progress from it). That observes the
+position; it does not guarantee continued playback or lasting TV alignment.
+While reconnected audio is loaded, pressing Back/Ahead, Jump to incoming audio
+or a play choice, pausing, or touching or keyboard-operating the audio controls
+cancels a pending return. While waiting to reconnect, the audio is unloaded and
+the in-page movement controls are disabled. Touching or keyboard-operating the
+audio controls still cancels the return, and Stop remains available. A later
+playback change also clears the
+completed recovery message. Phone lock-screen, media-session or accessibility
+seeks cannot be identified as yours during that short window. Such a seek may be
+overridden once by the return. Always check alignment with your TV afterward;
+TV sync is not guaranteed. A reconnect also clears play choices already shown,
+but it keeps the timestamp offset and timing source.
+
 ## Gateway development and publishing
 
 See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for the current private catalog and relay configuration, tests and rollout gates.

@@ -17,7 +17,7 @@ function harness(t,{delayTeams=false,duplicate=false,ageMs=0,requestMs=0,delayPl
  const providerTeam={id:'150',name:school,homestreamId:'duke'};
  let localNow=100000;const timers=[];
  w.setTimeout=(callback,ms)=>{const timer={callback,ms,cancelled:false};timers.push(timer);return timer;};w.clearTimeout=timer=>{if(timer)timer.cancelled=true;};
- class FakePlayer {constructor(){player=this;this.active=false;this.seeks=[]}stop(){this.active=false}start(){this.active=true}timing(){return {utc:base+25000,position:25,ranges:[[0,30]],spans:[{utc:base,position:0,duration:30}]}}seek(p){this.seeks.push(p);return true}live(){return true}}
+ class FakePlayer {constructor(audio,onStatus,options={}){player=this;this.active=false;this.seeks=[];this.onRecovery=options.onRecovery}stop(){this.active=false}start(){this.active=true}timing(){return {utc:base+25000,position:25,ranges:[[0,30]],spans:[{utc:base,position:0,duration:30}]}}seek(p){this.seeks.push(p);return true}live(){return true}}
  const readJSON=async url=>{
   requests.push(url.href);
   if(url.pathname.endsWith('/homestream/teams'))return[{id:'duke',name:school},{id:'gt',name:'Georgia Tech'},{id:'uva',name:'Virginia'},{id:'aub',name:'Auburn'}];
@@ -129,4 +129,15 @@ test('historical seek choices fail closed on poll failure, correction, stop, hid
  b=choice();const original=h.player.timing;h.player.timing=()=>({...original(),ranges:[[25,30]]});b.click();assert.equal(h.player.seeks.length,0);h.player.timing=original;
  b=choice();h.$('stop').click();b.click();assert.equal(h.player.seeks.length,0);h.$('play').click();b.click();assert.equal(h.player.seeks.length,0);
  b=choice();Object.defineProperty(h.w.document,'visibilityState',{value:'hidden',configurable:true});h.w.document.dispatchEvent(new h.w.Event('visibilitychange'));b.click();assert.equal(h.player.seeks.length,0);
+});
+test('Sync recovery clears old play choices and rerenders without losing calibration or timing source',async t=>{
+ const h=harness(t,{timingSource:'browser',ageMs:null});h.ui.activate();await tick();h.$('play').click();
+ h.$('offset').value='3';h.$('offset').dispatchEvent(new h.w.Event('input'));h.$('clock').value='10:00';h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));
+ const old=h.$('matches').children[0];assert.ok(old);
+ h.$('stop').disabled=true;h.player.onRecovery({type:'reconnecting'});
+ assert.equal(h.$('matches').children.length,0);assert.equal(h.$('stop').disabled,false,'Stop stays usable while the player retains recovery');
+ old.click();assert.equal(h.player.seeks.length,0);assert.match(h.$('result').textContent,/no longer/);
+ h.player.onRecovery({type:'restored'});
+ assert.equal(h.$('offset').value,'3');assert.equal(h.$('timing-source').value,'browser');
+ h.$('clock-form').dispatchEvent(new h.w.Event('submit',{cancelable:true}));h.$('matches').children[0].click();assert.equal(h.player.seeks.at(-1),13);
 });
