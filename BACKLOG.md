@@ -14,7 +14,7 @@
 - **SOURCES-01**: Add replays and CORS-safe schedule adapters without gating live channels on stale metadata. Validate naive timezone fields against publisher semantics before calling them authoritative.
 - **AUTO-01**: Decide whether automatic assistance is worthwhile from correction episodes, uncertainty intervals and user reports. Do not infer true drift from each nudge or claim ongoing alignment from a confirmation interval.
 - **AUDIO-01**: Measure memory and battery on older phones before changing the approximately 69 MB stereo float buffer at 48 kHz. Consider narrower storage only with evidence.
-- **UX-01**: Consider Media Session and wake-lock integration after actual foreground operation is verified; neither proves background continuity.
+- **UX-01**: Media Session *metadata* is implemented under issue #19 (see NOW-PLAYING-01). Media Session action handlers, position state and wake-lock remain unconsidered until foreground operation is verified. None of these prove background continuity.
 
 ## Planning disposition
 
@@ -29,7 +29,7 @@ GitHub Pages was enabled with GitHub Actions by the user on September 10, 2026; 
 - **GATEWAY-ACCOUNT-01**: User authorized and deployed `https://homecall-metadata.homecall.workers.dev` on September 12. Account/subdomain/deployment authorization are resolved. Independently confirm the account Free entitlement and remaining account-wide usage before public release; no paid upgrade is authorized or assumed.
 - **GATEWAY-CPU-01**: Measure actual deployed platform CPU for cold misses and cache hits, including large late-game/max-supported ESPN summaries and response re-serialization, against the selected Free entitlement. Local workerd tests and Node CPU samples are not platform proof. Keep this open until measurements pass; TTL increases cannot resolve cold-invocation CPU. Revisit the initial 2 MiB decoded-body bound only with supported-payload evidence.
 - **GATEWAY-CACHE-01**: Verify Cache API effectiveness at the actual deployed origin, hit/expiry behavior and per-delivery age. Local workerd proves a local hit only. Use workers.dev or ensure the custom-zone Worker route covers the internal `/__metadata_cache_v2` namespace as well as `/api/`; verify internal cache URLs return 404 through the Worker. Behavior on a narrower custom-zone route remains unverified. Deployment must remain correct when cache lookup/write fails or always misses, without stale fallback.
-- **GATEWAY-USAGE-01**: Measure steady-state account-wide requests and quota failures before release. Plays alone cost about 240 requests/listener-hour at 15-second polling; 60 listeners over four hours use 57,600 before other traffic. Backoff limits outage amplification, and CORS does not prevent non-browser quota use. No automatic paid upgrade.
+- **GATEWAY-USAGE-01**: Measure steady-state account-wide requests and quota failures before release. Plays alone cost about 240 requests/listener-hour at 15-second polling; 60 listeners over four hours use 57,600 before other traffic. The Now Playing scoreboard (issue #19) adds up to about 240 more requests per playing catalog-game listener-hour to the existing status route. Its 10-second shared cache absorbs duplicate reads, so upstream fetches are bounded per team and season, not per listener; the Worker still counts each request. Backoff limits outage amplification, and CORS does not prevent non-browser quota use. No automatic paid upgrade.
 - **GATEWAY-HOST-01**: Production diagnostic version `164290fb-29e4-41e0-9fa9-1b93a3f93550` proved all three ESPN upstream requests return HTTP 403 HTML (September 13 UTC); the gateway's 502 was masking upstream refusal. The supported-team lookup now uses four verified provider associations without that upstream dependency. That September refusal is the historical record; it no longer describes schedule access. On 2026-10-07 at 04:44:43 UTC the deployed gateway's `/api/sync/schedule/150/2026` returned HTTP 200. A direct request to the same ESPN schedule also returned 200, with a `Date` header and `Cache-Control: max-age=10`. Play (summary) access from the Worker was not re-probed and remains unverified. The explicit browser alternative supports user-confirmed historical-play seeking with unknown age, never a live-clock estimate or automatic fallback. Before publishing, prove permitted browser transport and useful behavior; no access-denial evasion or invented freshness. Do not set Pages `VITE_GATEWAY_ORIGIN` or merge for release until the selected path meets acceptance.
 - **GATEWAY-BROWSER-01**: In a permitted real browser/device, prove the deployed gateway plus direct CloudFront HLS playlist advancement, audible playback and manual controls, stale/hidden-tab clock-seek behavior, and metadata-failure isolation. The managed browser security check remains unavailable as of September 12; no alternate browser bypass. Runtime HTTP fixtures do not close this gate or VISUAL-01/DEVICE-01.
 
@@ -58,6 +58,34 @@ GitHub Pages was enabled with GitHub Actions by the user on September 10, 2026; 
 
   If upstream refusal returns, every label shows Status unavailable (safe, but no value). No browser fallback or access-denial workaround.
 - **NAV-320-01 (open, existing UI)**: At 320px the mode tabs (Live/Sync/Archive) overflow. The Archive tab's right edge measured 340px in fixture Chrome during issue #10 checks. The cause is the unchanged navigation CSS (`min-width:100px` per tab, gaps and padding in `style.css`), not the status change; the Sync game select, status labels and help text stayed inside their container. Repair the narrow navigation in a separate change. Until then, no whole-page 320px overflow acceptance is claimed. Native dropdown/open-picker appearance remains unverified (STATUS-01, VISUAL-01).
+
+## Now Playing metadata (issue #19)
+
+Release stays 0.4.0; the build hash identifies the deployment. Issue #19 stays open: delivering the code does not close it.
+
+- **NOW-PLAYING-01 (open, native/live/car gate)**: Verify on supported phones (iPhone lock screen; Android if the owner elects) and the car integration actually used: artwork, title, artist and album text, truncation, and the existing controls.
+  - Device, browser and car models are unknown. The original issue photos were not available to implementation.
+  - Exercise each mode: Live radio, Live GT game, Sync game, Archive and demo.
+  - Exercise stale and terminal cases: pause, reconnect, stop, game end, source switch, and a live-to-final transition.
+  - During an actual supported live game, record the raw competition- and event-level status, period, clock and score fields, plus the deployed `scoreboard` across polls.
+  - Live and halftime shapes are synthetic until then. Between-period names such as `STATUS_END_PERIOD` intentionally show identity only.
+  - Browser `navigator.mediaSession` readback, jsdom tests and served-asset checks are not phone or car proof. Missing evidence is not a pass.
+- **NOW-PLAYING-02 (accepted platform limitation, verify on device)**: Score and clock are reported snapshots, not a running clock. The title carries the source and receipt date/time. Sports-data reporting can lag the game, and delayed radio commentary can be ahead of or behind it.
+  - The browser metadata has no TTL. If the OS suspends the page without `pagehide`/`freeze`, the last card can stay visible until JavaScript runs again.
+  - Polling while hidden is best-effort and may be throttled.
+  - The title may be truncated by the platform, but source and receipt time come before the score.
+  - Blanket clearing on `visibilitychange: hidden` was rejected because it would remove the requested locked-screen information. Revisit only with device evidence.
+- **NOW-PLAYING-03 (follow-up)**: Ordinary Live radio (Duke and affiliates, Miami, Virginia Tech) has no bound game and never shows a score. A durable, explicit radio-to-game association would be needed first; never guess from kickoff time, a single live event or fuzzy names (Virginia Tech ≠ Virginia).
+- **NOW-PLAYING-ART-01 (follow-up)**: This release ships one original Homecall PNG for every mode and school (`public/now-playing/PROVENANCE.md`). Team-specific artwork needs appropriate source/rights review and native verification. No per-team map, mark redistribution, runtime CDN or proxy is authorized.
+- **NOW-PLAYING-RELEASE-01 (open)**: Release order:
+  1. Deploy the Worker only from the merge-reviewed tree.
+  2. Pages deploys automatically after merge. An older Worker without `scoreboard` degrades to identity-only metadata.
+  3. Verify the actual status route and the exact served build.
+  4. Verify the served PNG: HTTP 200, `image/png`, 512 × 512.
+  5. Verify CORS and cache age.
+  6. Record rollback versions. Current rollback: Worker `6bfdbeb0-913b-4dce-aabb-4ff5d7bdf9ec`, Pages base `bc142ae`.
+
+  No paid upgrade is authorized.
 
 ## Private stream rollout — released as 0.4.0 on September 19
 

@@ -27,6 +27,11 @@ const upstream = async request => {
   if (url.searchParams.get('event') === '3') return new FixtureResponse('<html>invalid</html>', { headers: { 'Content-Type': 'text/html' } });
   if (url.searchParams.get('event') === '4') return new FixtureResponse(' '.repeat(2 * 1024 * 1024 + 1), { headers: { 'Content-Type': 'application/json' } });
   if (url.pathname.endsWith('/summary')) return FixtureResponse.json({header:{id:url.searchParams.get('event'),uid:`s:20~l:23~e:${url.searchParams.get('event')}`,league:{id:'23',slug:'college-football'},season:{year:2026},competitions:[{id:url.searchParams.get('event'),competitors:[{team:{id:'150'}},{team:{id:'356'}}]}]},drives:{previous:[],current:{plays:[]}}}, {headers:{Date:new Date().toUTCString(),Age:'2'}});
+  // SYNTHETIC live game (issue #19 scoreboard contract), not a captured provider sample.
+  if (url.pathname.endsWith('/schedule') && url.searchParams.get('season') === '2025') return FixtureResponse.json({team:{id:'150'},season:{year:2025},events:[{id:'401700001',date:'2025-10-11T19:30Z',season:{year:2025},competitions:[{id:'401700001',competitors:[
+    {id:'59',homeAway:'home',score:{value:17,displayValue:'17'},team:{id:'59',location:'Georgia Tech',abbreviation:'GT',logos:[{href:'https://a.espncdn.com/i/teamlogos/ncaa/500/59.png'}]}},
+    {id:'150',homeAway:'away',score:{value:14,displayValue:'14'},team:{id:'150',location:'Duke',abbreviation:'DUKE',logos:[{href:'https://a.espncdn.com/i/teamlogos/ncaa/500/150.png'}]}}],
+    status:{clock:449,displayClock:'7:29',period:2,type:{id:'2',name:'STATUS_IN_PROGRESS',state:'in',completed:false,description:'In Progress',detail:'7:29 - 2nd Quarter',shortDetail:'7:29 - 2nd'}}}]}]}, {headers:{Date:new Date().toUTCString(),Age:'1'}});
   if (url.pathname.endsWith('/schedule')) return FixtureResponse.json({team:{id:'150'},season:{year:2026},events:[{id:'401858255',date:'2026-10-10T19:30Z',season:{year:2026},competitions:[{id:'401858255',competitors:[{id:'150',team:{id:'150',location:'Duke'}},{id:'2390',team:{id:'2390',location:'Tulane'}}],
     status:{clock:0,displayClock:'0:00',period:0,type:{id:'1',name:'STATUS_SCHEDULED',state:'pre',completed:false,description:'Scheduled',detail:'Sat, October 10th at 3:30 PM EDT',shortDetail:'10/10 - 3:30 PM EDT'}}}]}]}, {headers:{Date:new Date().toUTCString(),Age:'1'}});
   if (url.pathname.includes('/games/')) return FixtureResponse.json({success:true,games:[]});
@@ -121,6 +126,17 @@ try {
   assert.equal(calls, statusBefore + 1, 'Status cache hit must avoid another fixture upstream call');
   for (const target of ['/api/sync/status/356/2026', '/api/sync/status/150/2026?season=2025', '/api/sync/status/%31%35%30/2026']) assert.equal((await request(target)).status, 404, target);
   assert.equal(calls, statusBefore + 1, 'Unsupported status targets never reach upstream');
+  const boardBefore = calls;
+  const liveStatus = await request('/api/sync/status/150/2025', { headers: { Origin: origin } });
+  assert.equal(liveStatus.status, 200);
+  assert.equal(liveStatus.headers.get('Access-Control-Allow-Origin'), origin);
+  const liveText = await liveStatus.text(), liveData = JSON.parse(liveText);
+  assert.deepEqual(Object.keys(liveData), ['schemaVersion','teamId','season','checkedAt','ageMs','events'], 'schema 1 envelope is unchanged');
+  assert.deepEqual(liveData.events, [{id:'401700001',start:Date.parse('2025-10-11T19:30:00Z'),teams:['Georgia Tech','Duke'],teamIds:['59','150'],season:2025,status:'live',
+    scoreboard:{phase:'in-progress',period:2,clock:'7:29',scores:{59:17,150:14}}}]);
+  for (const leaked of ['espncdn','logos','abbreviation','homeAway','displayClock','2nd','In Progress']) assert.ok(!liveText.includes(leaked), leaked);
+  assert.ok(Number.isSafeInteger(liveData.ageMs));
+  assert.equal(calls, boardBefore + 1);
   assert.equal((await request('/api/sync/teams', { headers: { Origin: 'null' } })).status, 403);
   assert.equal((await request('/api/sync/teams?host=evil')).status, 404);
   assert.equal((await request('/api/sync/%74eams')).status, 404);
@@ -136,6 +152,6 @@ try {
   const runtime = await (await probe.fetch('https://probe.invalid')).json();
   assert.deepEqual(runtime, {timeout:true,cancelled:true,cache:'no-store',credentials:'omit',redirect:'manual',combinedSignal:true});
   console.log(JSON.stringify({ result: 'PASS', workerd: JSON.parse(readFileSync('node_modules/workerd/package.json')).version,
-    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'six HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility'],
+    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'six HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'synthetic live scoreboard in the unchanged schema 1 status envelope','per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility'],
     limitation: 'Local workerd with fixture upstreams; no deployed cache, platform CPU, browser HLS or account entitlement proof.' }, null, 2));
 } finally { await mf.dispose(); }

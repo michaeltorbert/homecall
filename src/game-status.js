@@ -1,5 +1,5 @@
 import { createTimingFreshness, nextPollDelay } from './timing-freshness.js';
-import { schoolKey, footballSeason, matchEvent } from './sync-mapping.js';
+import { schoolKey, footballSeason, matchEvent, clockSeconds } from './sync-mapping.js';
 // Source-reported game status for option labels only. No audio, player, timing-source,
 // calibration or selection dependency: a status update can only change label text.
 export const STATUS_LABELS = Object.freeze({ live: 'LIVE', upcoming: 'Upcoming', completed: 'Completed', unavailable: 'Status unavailable' });
@@ -9,6 +9,27 @@ const STATES = new Set(['live', 'upcoming', 'completed', 'unknown']);
 const validId = value => typeof value === 'string' && /^\d{1,12}$/.test(value);
 const validSeason = value => Number.isInteger(value) && value >= 2000 && value < 2100;
 const counts = values => { const map = new Map(); for (const value of values) map.set(value, (map.get(value) || 0) + 1); return map; };
+const PHASES = new Set(['in-progress', 'halftime']), BOARD_KEYS = new Set(['phase', 'period', 'clock', 'scores']);
+const plain = value => !!value && typeof value === 'object' && !Array.isArray(value);
+// Optional live scoreboard. A malformed board is dropped; its event and status stay valid.
+export function validateScoreboard(board, teamIds) {
+  if (!plain(board) || !PHASES.has(board.phase) || Object.keys(board).some(key => !BOARD_KEYS.has(key))) return null;
+  const result = { phase: board.phase };
+  if ('period' in board) {
+    if (!Number.isInteger(board.period) || board.period < 1 || board.period > 99) return null;
+    result.period = board.period;
+  }
+  if ('clock' in board) {
+    if (board.phase !== 'in-progress' || !(result.period <= 4) || typeof board.clock !== 'string' || !/^\d{1,2}:[0-5]\d$/.test(board.clock) || !(clockSeconds(board.clock) <= 900)) return null;
+    result.clock = board.clock;
+  }
+  if ('scores' in board) {
+    const scores = board.scores;
+    if (!plain(scores) || Object.keys(scores).length !== 2 || !teamIds.every(id => Object.hasOwn(scores, id) && Number.isInteger(scores[id]) && scores[id] >= 0 && scores[id] <= 999)) return null;
+    result.scores = Object.fromEntries(teamIds.map(id => [id, scores[id]]));
+  }
+  return result;
+}
 
 export function validateStatusSnapshot(data, { teamId, season }) {
   if (data?.schemaVersion !== 1 || data.teamId !== teamId || data.season !== season || !Array.isArray(data.events)) throw Error('status-invalid');
@@ -16,22 +37,28 @@ export function validateStatusSnapshot(data, { teamId, season }) {
     Array.isArray(e.teams) && e.teams.length === 2 && e.teams.every(t => typeof t === 'string' && t.trim()) &&
     Array.isArray(e.teamIds) && e.teamIds.length === 2 && e.teamIds.every(validId) && new Set(e.teamIds).size === 2 && e.teamIds.includes(teamId));
   const ids = counts(events.map(e => e.id));
-  return events.filter(e => ids.get(e.id) === 1).map(e => ({ id: e.id, start: e.start, teams: [...e.teams], teamIds: [...e.teamIds], season: e.season, status: e.status }));
+  return events.filter(e => ids.get(e.id) === 1).map(e => {
+    const event = { id: e.id, start: e.start, teams: [...e.teams], teamIds: [...e.teamIds], season: e.season, status: e.status };
+    const scoreboard = e.status === 'live' && e.scoreboard !== undefined ? validateScoreboard(e.scoreboard, event.teamIds) : null;
+    return scoreboard ? { ...event, scoreboard } : event;
+  });
 }
 // Only the two most recent catalog seasons are polled; older games stay unavailable.
 export function statusSeasons(games) {
   return [...new Set(games.filter(g => Number.isFinite(g?.start)).map(g => footballSeason(g.start)).filter(validSeason))].sort((a, b) => b - a).slice(0, MAX_STATUS_SEASONS);
 }
-// One-to-one: an event claimed by several catalog games labels none of them.
-export function gameStatuses(games, school, snapshots) {
+// One-to-one: an event claimed by several catalog games matches none of them.
+export function gameMatches(games, school, snapshots) {
   const gameIds = counts(games.map(g => g.id));
   const matched = games.map(game => {
     const snapshot = Number.isFinite(game.start) ? snapshots.get(footballSeason(game.start)) : null;
     return [game, snapshot ? matchEvent(snapshot.events, school, game, snapshot.providerId) : null];
   });
   const claims = counts(matched.filter(([, event]) => event).map(([, event]) => event.id));
-  return new Map(matched.map(([game, event]) => [game.id,
-    event && gameIds.get(game.id) === 1 && claims.get(event.id) === 1 && event.status !== 'unknown' ? event.status : 'unavailable']));
+  return new Map(matched.map(([game, event]) => [game.id, event && gameIds.get(game.id) === 1 && claims.get(event.id) === 1 ? event : null]));
+}
+export function gameStatuses(games, school, snapshots) {
+  return new Map([...gameMatches(games, school, snapshots)].map(([id, event]) => [id, event && event.status !== 'unknown' ? event.status : 'unavailable']));
 }
 export function createGameStatus({ read, onUpdate, enabled = () => true, clock, timeout = ms => AbortSignal.timeout(ms), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = timer => clearTimeout(timer) }) {
   let generation = 0, catalog = null, seasons = new Map(), run = null, teams = null, teamsRequest = null, lifecycle = 0, published = '';

@@ -5,6 +5,9 @@ import { JSDOM } from 'jsdom';
 import { PlaybackMemory } from '../src/playback-memory.js';
 import { SessionLog } from '../src/session-log.js';
 import { teams, getSources } from '../src/teams.js';
+import { createNowPlaying, nowPlayingArtwork } from '../src/now-playing.js';
+import { createScoreboard } from '../src/scoreboard.js';
+import { metadataURL, configuredGatewayOrigin, gatewayOptions } from '../src/gateway.js';
 globalThis.__GATEWAY_ORIGIN__='https://gateway.example';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
@@ -19,7 +22,8 @@ function harness(t, catalogFactory) {
   command(type,value){this.lastCommand={type,value};return Promise.resolve({result:'applied',before:{delay:35},after:{delay:35},contextSeconds:1});}
   resumeContext(){return Promise.resolve();}
  }
- Object.assign(w,{setupSync:()=>({}),setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,stop(){},setEnabled(){}}),PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{}});
+ Object.assign(w,{setupSync:()=>({}),setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,stop(){},setEnabled(){}}),PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{},
+  createNowPlaying,nowPlayingArtwork,createScoreboard,metadataURL,configuredGatewayOrigin,gatewayOptions,readJSON:async()=>{throw Error('no metadata in recovery tests');}});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
  w.URL.revokeObjectURL=()=>{};w.eval(source);return {w,player,get catalog(){return catalog},$:id=>w.document.getElementById(id)};
 }

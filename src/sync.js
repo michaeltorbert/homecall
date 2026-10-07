@@ -6,11 +6,27 @@ import { setupHomestream } from './homestream-ui.js';
 import { createGameStatus } from './game-status.js';
 import { SyncPlayer } from './sync-player.js';
 import { schoolKey, footballSeason, matchEvent, availableAnchors, selectAnchors, gameOrder, playLabel } from './sync-mapping.js';
-export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } = {}) {
+export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {}, nowPlaying = null, scoreboard = null } = {}) {
   const $ = id => document.getElementById(`sync-${id}`);
   // A reconnect moves the HLS timeline: old play choices expire; offset, calibration and timing source stay.
-  const audio = $('audio'), player = new SyncPlayer(audio, text => { $('playback').textContent = text; }, { onRecovery: () => { clearChoices(); render(); } });
+  // It also invalidates the Now Playing scoreboard without forgetting the session; a terminal stop releases it.
+  const audio = $('audio'), player = new SyncPlayer(audio, text => { $('playback').textContent = text; }, { onRecovery: event => {
+    if (event?.type === 'stopped') release(); else if (event?.type === 'reconnecting') scoreboard?.invalidate();
+    clearChoices(); render();
+  } });
   let active = false, teamsController, mappingController, pollTimer, plays = [], conflict = false, calibrationKey = null, selectionKey = null, snapshot = 0, timingReady = false;
+  let owner = null, statusCatalog = null;
+  function release() { scoreboard?.stop(); owner?.release(); owner = null; }
+  // Claimed before player.start, which can synchronously report a terminal stop.
+  function claim(game) {
+    release();
+    if (!nowPlaying) return;
+    const mine = owner = nowPlaying.claim({ mode: 'sync', school: school(), opponent: game.opponent });
+    if (statusCatalog && nowPlaying.supported) scoreboard?.start({ teamId: statusCatalog.teamId, school: school(), game, games: statusCatalog.games,
+      eligible: () => owner === mine && mine.current && player.active && !audio.paused && !audio.ended, onUpdate: value => mine.update(value) });
+  }
+  // Additive listeners: the player owns the audio element's on* handlers.
+  for (const type of ['playing', 'pause', 'ended', 'emptied']) audio.addEventListener(type, () => scoreboard?.check());
   const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
   const freshness = createTimingFreshness();
   const retry = document.createElement('button');
@@ -32,7 +48,7 @@ export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } 
     $('mapping-note').textContent = 'Waiting for game timing data.';
   }
   function reset() {
-    player.stop(); clearMapping(); $('playback').textContent = 'Stopped.';
+    release(); player.stop(); clearMapping(); $('playback').textContent = 'Stopped.';
     $('result').textContent = ''; render();
   }
   async function loadMapping(game) {
@@ -82,7 +98,7 @@ export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } 
       if (selected !== selectionKey) { $('offset').value = '0'; calibrationKey = null; selectionKey = selected; }
       $('title').textContent = `${school()} vs ${catalog.ready.opponent}`; loadMapping(catalog.ready); }
     render();
-  }, onGames:(games, {teamId}) => gameStatus.setGames({games, teamId, school:school()}), onCatalogInvalidated:() => gameStatus.clear()});
+  }, onGames:(games, {teamId}) => { statusCatalog = {games, teamId}; gameStatus.setGames({games, teamId, school:school()}); }, onCatalogInvalidated:() => { statusCatalog = null; gameStatus.clear(); }});
   function render() {
     const timing = player.timing(), fresh = freshness.fresh();
     const ageLabel = freshness.status() === 'unknown' ? 'freshness unknown' : 'stale data';
@@ -99,6 +115,7 @@ export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } 
     $('mapped').textContent = previous ? `${playLabel(previous)} · estimated anchor${fresh?'':` · ${ageLabel}`}` : 'No matching play anchor';
     $('range').textContent = anchors.length ? `${playLabel(anchors[0])} → ${playLabel(anchors.at(-1))} (earliest → latest)${fresh?'':` · ${ageLabel}`}` : 'No recorded plays inside the available audio window';
     $('range-note').textContent = 'Recorded-play bounds, not a running game clock. A stopped clock can match several plays. Find a play, confirm its description, then fine-tune by ear. Overtime uses manual adjustment.';
+    scoreboard?.check();
   }
   async function loadTeams() {
     teamsController?.abort(); const signal = (teamsController = new AbortController()).signal;
@@ -120,9 +137,9 @@ export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } 
   $('play').onclick = () => {
     if (!catalog.ready) return;
     if (player.active) { catalog.refresh(); return; }
-    stopLive(); clearChoices(); player.start(catalog.ready.url); render();
+    stopLive(); clearChoices(); claim(catalog.ready); player.start(catalog.ready.url); render();
   };
-  $('stop').onclick = () => { clearChoices(); player.stop(); $('playback').textContent = 'Stopped.'; render(); };
+  $('stop').onclick = () => { clearChoices(); release(); player.stop(); $('playback').textContent = 'Stopped.'; render(); };
   $('incoming').onclick = () => { $('result').textContent = player.live() ? 'Moved to incoming audio. Check against your TV.' : 'No live audio window is available yet.'; };
   document.querySelectorAll('[data-sync-nudge]').forEach(b => { b.onclick = () => {
     const delta = Number(b.dataset.syncNudge);
