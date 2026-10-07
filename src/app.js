@@ -6,6 +6,10 @@ import { setupHomestream } from './homestream-ui.js';
 import { Player } from './player.js';
 import { SessionLog } from './session-log.js';
 import { demoURL } from './demo.js';
+import { createNowPlaying, nowPlayingArtwork } from './now-playing.js';
+import { createScoreboard } from './scoreboard.js';
+import { readJSON } from './homestream.js';
+import { metadataURL, configuredGatewayOrigin, gatewayOptions } from './gateway.js';
 const $ = id => document.getElementById(id);
 let storage;
 try { storage = localStorage; } catch { /* Private browsing may deny access. */ }
@@ -20,6 +24,17 @@ const build = typeof __APP_BUILD__ === 'string' ? __APP_BUILD__ : 'development';
 $('build').textContent = build;
 const log = new SessionLog({ storage, build, onWarning: text => { $('storage-warning').textContent = text; } });
 const notice = text => { $('notice').textContent = text; };
+// One application-wide Now Playing publisher; Live, Sync and Archive each claim it on playback start.
+const nowPlaying = createNowPlaying({ mediaSession: navigator.mediaSession, MediaMetadata: window.MediaMetadata, artwork: nowPlayingArtwork(document.baseURI) });
+const scoreboard = () => createScoreboard({ read: (path, options) => readJSON(metadataURL(path, document.baseURI, configuredGatewayOrigin(), gatewayOptions()), options), window, document,
+  setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: timer => clearTimeout(timer), setTicker: (fn, ms) => setInterval(fn, ms), clearTicker: timer => clearInterval(timer) });
+const liveBoard = scoreboard();
+let liveOwner = null, liveCatalog = null;
+// Volatile game data follows actual PCM output, not input ingestion or the selected tab, and
+// stops as soon as another session owns Now Playing.
+const livePlaying = () => !!liveOwner?.current && active && !connecting && !!state && player.context?.state === 'running' && !!player.audio && !player.audio.paused &&
+  !sourcePaused && !state.paused && !state.holding && state.restoring == null;
+function releaseLive() { liveBoard.stop(); liveOwner?.release(); liveOwner = null; }
 const player = new Player(update, event => {
   if (!active) return;
   if (event === 'source-reconnecting') connecting = true;
@@ -52,10 +67,11 @@ const player = new Player(update, event => {
   }
   render();
 });
-const catalog = setupHomestream({ onChange: disconnect, onReady: render });
+const catalog = setupHomestream({ onChange: disconnect, onReady: render,
+  onGames: (games, { teamId }) => { liveCatalog = { games, teamId }; }, onCatalogInvalidated: () => { liveCatalog = null; } });
 function update(value) {
   if (value === null && active) {
-    log.end(state); active = false; sourceStatus = 'Disconnected';
+    releaseLive(); log.end(state); active = false; sourceStatus = 'Disconnected';
     if (demo) URL.revokeObjectURL(demo); demo = null;
     refreshSessions();
   }
@@ -101,6 +117,7 @@ function render() {
   }
   $('provider').disabled = $('output').disabled = active;
   for (const id of ['share', 'copy', 'download']) $(id).disabled = !previewText || pending > 0;
+  liveBoard.check();
 }
 function currentSource() {
   return getSources(selected).find(source => source.sourceId === selectedSourceId);
@@ -140,7 +157,7 @@ function sourceChanged() {
   showSource(); notice(`Ready for ${currentSource().station}. Press Play to start at 0 seconds, then check alignment.`); render();
 }
 function disconnect() {
-  catalog.stop(); ++generation; sourcePaused = false; liveKey = null; savedDelay = null; log.end(state); player.stop();
+  releaseLive(); catalog.stop(); ++generation; sourcePaused = false; liveKey = null; savedDelay = null; log.end(state); player.stop();
   if (demo) URL.revokeObjectURL(demo); demo = null;
   state = null; active = connecting = false; pending = 0; specialPending = false;
   needsCheck = true; sourceStatus = 'Disconnected'; refreshSessions(); render();
@@ -159,6 +176,11 @@ async function connect(useDemo = false) {
   log.start(selected, useDemo ? 'test-tone' : source.sourceId, useDemo ? 'demo' : 'live', $('provider').value, $('output').value);
   sourceStatus = 'Connecting'; notice('Connecting to the audio source…');
   $('station').textContent = useDemo ? 'Timing demo · repeating tones' : game ? `${team.name} vs ${game.opponent}` : source.station;
+  // Identity is frozen at the playback intent. Radio is never guessed into a game, so only a
+  // catalog-bound game can add a scoreboard.
+  const owner = liveOwner = nowPlaying.claim(useDemo ? { mode: 'demo', title: 'Timing demo · repeating tones' }
+    : game ? { mode: 'game', school: team.name, opponent: game.opponent, album: source.station } : { mode: 'live', school: team.name, title: source.station });
+  if (game && liveCatalog && nowPlaying.supported) liveBoard.start({ teamId: liveCatalog.teamId, school: team.name, game, games: liveCatalog.games, eligible: livePlaying, onUpdate: snapshot => owner.update(snapshot) });
   refreshSessions(log.session.id); render();
   try {
     const url = useDemo ? (demo = demoURL()) : game ? game.url : source.url;
@@ -174,7 +196,7 @@ async function connect(useDemo = false) {
     connecting = false; notice(restoreDelay > 0 && !useDemo ? `Restoring your saved ${restoreDelay.toFixed(1)}-second delay. Audio will resume when enough history is available; check alignment. Choose Jump to incoming audio to skip the wait.` : useDemo ? 'Demo only: a tone each second, higher every fifth. Try pause, delay and the two-tap match.' : 'Listen for a distinct play to match. If audio already trails TV, pause the TV.');
   } catch {
     if (mine !== generation) return;
-    log.boundary('source-error', state); log.end(state);
+    releaseLive(); log.boundary('source-error', state); log.end(state);
     active = connecting = false; state = null; sourceStatus = 'Could not connect';
     notice(connectionHelp());
     refreshSessions();
@@ -304,4 +326,4 @@ window.addEventListener('pagehide', () => { log.boundary('hidden', state); });
 setInterval(() => { if (active && state) log.heartbeat(state, !document.hidden && player.context?.state === 'running'); }, 30000);
 teamChanged(); refreshSessions(); render();
 
-setupArchive({ stopLive: disconnect, selectedTeam: () => selected, memory, sync: setupSync({ initialSchool: () => teams[selected].name, stopLive: disconnect }) });
+setupArchive({ stopLive: disconnect, selectedTeam: () => selected, memory, nowPlaying, sync: setupSync({ initialSchool: () => teams[selected].name, stopLive: disconnect, nowPlaying, scoreboard: scoreboard() }) });

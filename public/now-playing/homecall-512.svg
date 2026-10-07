@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Original Homecall Now Playing artwork source (issue #19). Primitives only: no text, fonts,
+       raster images, external references or team marks. Opaque so platform masks never reveal
+       transparency. The app references only the rendered homecall-512.png; see PROVENANCE.md. -->
+  <rect width="512" height="512" fill="#10151e"/>
+  <rect x="56" y="56" width="400" height="400" rx="72" fill="#18202d"/>
+  <!-- Home: roof and walls. -->
+  <path d="M120 256 L256 136 L392 256" fill="none" stroke="#ecf0f7" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M156 236 V384 H356 V236" fill="none" stroke="#ecf0f7" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Call: a source dot with two broadcast arcs. -->
+  <circle cx="220" cy="304" r="20" fill="#8daeff"/>
+  <path d="M251.1 272.9 A44 44 0 0 1 251.1 335.1" fill="none" stroke="#8daeff" stroke-width="18" stroke-linecap="round"/>
+  <path d="M269.5 254.5 A70 70 0 0 1 269.5 353.5" fill="none" stroke="#8daeff" stroke-width="18" stroke-linecap="round"/>
+</svg>

@@ -159,7 +159,8 @@ Sync uses HLS.js playback positions, not Live's PCM buffer. In browsers falling
 back to native HLS, audio and manual seeking may work but this implementation
 cannot expose the program timestamp, so game-clock mapping stays unavailable.
 No camera/microphone access, automatic TV sync, audible validation or locked
-screen support is claimed. The metadata Worker must be deployed and configured before Sync discovery works
+screen playback support is claimed. Now Playing metadata is best-effort; see the
+Now Playing section below. The metadata Worker must be deployed and configured before Sync discovery works
 on static GitHub Pages. Local build and mock tests do not establish real browser
 playback or precise alignment.
 
@@ -196,6 +197,81 @@ seeks cannot be identified as yours during that short window. Such a seek may be
 overridden once by the return. Always check alignment with your TV afterward;
 TV sync is not guaranteed. A reconnect also clears play choices already shown,
 but it keeps the timestamp offset and timing source.
+
+## Now Playing on the lock screen and in the car (issue #19)
+
+While audio plays, Homecall publishes Now Playing metadata through the browser's
+Media Session API. Phone lock screens and connected car displays read it. Only
+metadata is written. Homecall registers no action handlers and writes no position
+or playback state, so the existing play/pause controls, delay, calibration, Sync
+recovery and Archive bookmarks behave as before. A session is claimed only when
+you start playback, never by changing tabs, picking a team or game, or a feed
+becoming ready. Stopping, switching sources, a failed start and other terminal
+stops clear it. A later session always replaces an earlier one, and an earlier
+session can never clear its replacement.
+
+**What is shown.** Every mode shows one original Homecall image,
+`now-playing/homecall-512.png` (see `public/now-playing/PROVENANCE.md`). It shows
+no team logos. The text identifies the audio:
+
+- **Live radio** (Duke, Miami, Virginia Tech and Duke affiliates): the station
+  name and school. Radio is never matched to a game from the kickoff time or a
+  single live event, so it never shows a score.
+- **Live game** (Georgia Tech catalog games) and **Sync game** (all four
+  supported schools): the catalog matchup, for example "Georgia Tech vs Duke".
+- **Archive**: the recording's school and opponent, with no score or result.
+- **Timing demo**: a test-tone label.
+
+**Score, period and clock (catalog-bound games only).** While the game audio is
+actually playing, the page reads the existing `/api/sync/status/<team-id>/<year>`
+envelope every 15 seconds. That route gained one backward-compatible optional
+field on live events only: `scoreboard: {phase, period?, clock?, scores?}`. The
+status enum and the other events are unchanged. The scoreboard keeps:
+
+- the period;
+- a regulation clock, only when the numeric and displayed clocks agree;
+- both scores, keyed by provider team ID, only when both are well-formed.
+
+Halftime and overtime clocks, contested copies and anything malformed are left
+out. A missing score never erases a valid period or clock, and half a score is
+never shown.
+
+The source and the time Homecall received the data share the title field with
+the score, and come before it:
+
+`Live · ESPN data received 10/7, 3:41 PM · Georgia Tech 17, Duke 14 · Q2 7:29`
+
+That time is when Homecall received the snapshot. It is not when the play
+happened, and the clock does not tick between snapshots. Homecall controls only
+the field contents. Phones and cars may truncate, lay out, display or cache the
+fields independently, so there is no native guarantee that the source and time
+stay visible next to the score.
+
+These remove the score and clock, leaving the matchup and artwork. The removal
+happens when page JavaScript runs: on the triggering event, or within about one
+second through the watchdog. There is no deadline while the OS has the page
+suspended.
+
+- pausing, holding or restoring a delay;
+- a phone audio interruption or reconnect;
+- a stale or unknown snapshot age (the same 45-second budget as status labels);
+- a clock step or failed request;
+- the game leaving live status, or an ambiguous match.
+
+Each playing session freezes the first provider event it matches; a different
+event never inherits it. Failures back off 30, 60, then 120 seconds. A status
+failure never stops audio. Polling continues while the tab is hidden as long as
+that game audio keeps playing. Returning to the tab checks expiry before
+refreshing. `pagehide` and `freeze` clear the score; `pageshow` and `resume`
+revalidate.
+
+**Limits.** Homecall cannot control how phones or cars lay out, truncate or
+cache this text and artwork. The browser's metadata has no expiry. If the OS
+suspends the page without a lifecycle event, an old score can stay on the lock
+screen until JavaScript runs again, and background timers may be throttled, so
+updates are best-effort. Sports data can lag the game, and delayed radio
+commentary can be ahead of or behind it. Browser API checks are not phone or car
+acceptance; see BACKLOG `NOW-PLAYING-01`.
 
 ## Gateway development and publishing
 

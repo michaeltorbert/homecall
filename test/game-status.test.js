@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameStatus, validateStatusSnapshot, statusSeasons, gameStatuses, STATUS_LABELS } from '../src/game-status.js';
+import { createGameStatus, validateStatusSnapshot, validateScoreboard, statusSeasons, gameStatuses, gameMatches, STATUS_LABELS } from '../src/game-status.js';
 import { metadataGateway } from '../lib/metadata-gateway.mjs';
 import { footballSeason } from '../src/sync-mapping.js';
 const DUKE = '2903e5f6-960e-4954-a3ec-f7754e78660f', GT = '410422f0-663f-4e3d-82e2-787d954ae29d';
@@ -42,6 +42,33 @@ test('snapshot validation binds schema, team and season and drops malformed or d
   const events = [ev('101', G1, 'completed'), ev('102', G2, 'LIVE'), { ...ev('103', G2, 'live'), teamIds: ['59', '2390'] }, { ...ev('104', G2, 'live'), teams: ['Duke'] },
     { ...ev('105', G2, 'live'), start: '2026-10-10' }, { ...ev('106', G2, 'live'), season: 2025 }, { ...ev('107', G2, 'live'), teamIds: ['150', '150'] }, ev('108', G2, 'unknown'), ev('108', G2, 'upcoming'), ev('109', G2, 'live')];
   assert.deepEqual(validateStatusSnapshot(envelope(2026, events), { teamId: '150', season: 2026 }).map(e => [e.id, e.status]), [['101', 'completed'], ['109', 'live']]);
+});
+test('optional live scoreboard: a malformed board is dropped while its event and status stay valid', () => {
+  const live = board => ({ ...ev('110', G2, 'live'), scoreboard: board });
+  const good = { phase: 'in-progress', period: 2, clock: '7:29', scores: { 150: 14, 2390: 17 } };
+  assert.deepEqual(validateScoreboard(good, ['150', '2390']), good);
+  assert.deepEqual(validateScoreboard({ phase: 'halftime', period: 2 }, ['150', '2390']), { phase: 'halftime', period: 2 });
+  assert.deepEqual(validateScoreboard({ phase: 'in-progress', period: 5 }, ['150', '2390']), { phase: 'in-progress', period: 5 });
+  assert.deepEqual(validateScoreboard({ phase: 'in-progress', period: 4, clock: '0:00', scores: { 150: 0, 2390: 0 } }, ['150', '2390']).scores, { 150: 0, 2390: 0 });
+  for (const bad of [null, [], 'live', {}, { phase: 'final' }, { ...good, extra: 1 }, { ...good, logo: 'https://a.espncdn.com/x.png' },
+    { ...good, period: 0 }, { ...good, period: 100 }, { ...good, period: '2' }, { ...good, clock: '7:60' }, { ...good, clock: '15:01' }, { ...good, clock: ' 7:29' }, { ...good, clock: 449 },
+    { phase: 'halftime', period: 2, clock: '0:00' }, { phase: 'in-progress', period: 5, clock: '5:00' }, { phase: 'in-progress', clock: '7:29' },
+    { ...good, scores: { 150: 14 } }, { ...good, scores: { 150: 14, 2390: 17, 59: 3 } }, { ...good, scores: { 150: 14, 59: 17 } }, { ...good, scores: { 150: '14', 2390: 17 } },
+    { ...good, scores: { 150: 14.5, 2390: 17 } }, { ...good, scores: { 150: -1, 2390: 17 } }, { ...good, scores: { 150: 1000, 2390: 17 } }, { ...good, scores: { 150: null, 2390: 17 } }, { ...good, scores: [14, 17] }])
+    assert.equal(validateScoreboard(bad, ['150', '2390']), null, JSON.stringify(bad));
+  const events = validateStatusSnapshot(envelope(2026, [live(good), { ...live({ ...good, clock: 'bad' }), id: '111' }, { ...ev('112', G1, 'completed'), scoreboard: good }]), { teamId: '150', season: 2026 });
+  assert.deepEqual(events.map(e => [e.id, e.status, e.scoreboard]), [['110', 'live', good], ['111', 'live', undefined], ['112', 'completed', undefined]]);
+  assert.ok(!('scoreboard' in events[1]) && !('scoreboard' in events[2]));
+  assert.deepEqual(Object.keys(events[0]), ['id', 'start', 'teams', 'teamIds', 'season', 'status', 'scoreboard']);
+});
+test('gameMatches exposes the one-to-one event behind each label without changing labels', () => {
+  const snapshot = events => new Map([[2026, { providerId: '150', events }]]);
+  const events = [ev('101', G1, 'completed'), ev('102', G2, 'live')];
+  assert.deepEqual([...gameMatches([G1, G2, G3], 'Duke', snapshot(events))].map(([id, e]) => [id, e?.id ?? null]), [['g1', '101'], ['g2', '102'], ['g3', null]]);
+  const twin = { ...G2, id: 'g2-replay', start: G2.start + 3600 * 1000 };
+  assert.deepEqual([...gameMatches([G2, twin], 'Duke', snapshot(events)).values()], [null, null], 'two catalog games cannot both claim one event');
+  assert.equal(gameMatches([G2], 'Duke', snapshot([ev('102', G2, 'unknown')])).get('g2').id, '102', 'the match itself does not depend on the status label');
+  assert.equal(gameStatuses([G2], 'Duke', snapshot([ev('102', G2, 'unknown')])).get('g2'), 'unavailable');
 });
 test('only the two most recent valid catalog seasons are tracked; January belongs to the prior season', () => {
   assert.deepEqual(statusSeasons([G1, G2, G3, G4, G5]), [2026, 2025]);

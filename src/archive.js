@@ -1,10 +1,13 @@
 import { metadataURL, configuredGatewayOrigin, gatewayOptions } from './gateway.js';
 import { teams } from './teams.js';
 import { filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
-export function setupArchive({ stopLive, selectedTeam, memory, sync = null, origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal }) {
+export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowPlaying = null, origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
   let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
+  // Score-free recording identity. It stays through pause, end and error so native controls can
+  // replay; stopping or replacing the recording releases it.
+  let owner = null;
   function savePosition() {
     // A failed restore must not disable bookmarking for the rest of the listening session.
     // Wait for actual playback progress so a transient reset to zero cannot erase the old bookmark.
@@ -19,6 +22,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, orig
   const message = text => { $('replay-status').textContent = text; };
   function stop() {
     savePosition(); replayKey = null; restorePosition = null; ++playRequest; stopReplay(audio); current = null; $('replay-player').hidden = true;
+    owner?.release(); owner = null;
   }
   const modes = sync ? ['live', 'sync', 'archive'] : ['live', 'archive'];
   function selectMode(next) {
@@ -72,6 +76,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, orig
       button.append(title, detail); button.setAttribute('aria-label', `Play ${title.textContent}, ${detail.textContent}`);
       button.onclick = () => {
         stopLive(); stop(); current = item; replayKey = `${key}:${item.id}`; lastSaved = null; restoreAttempts = 0; playingStarted = false; failedRestoreAt = null; restorePosition = memory?.read('replay', replayKey)?.value ?? null; $('replay-player').hidden = false;
+        owner = nowPlaying?.claim({ mode: 'archive', school: team.name, opponent: item.opponent }) ?? null;
         $('replay-title').textContent = title.textContent; $('replay-audio').src = item.url;
         audio.playbackRate = Number($('replay-speed').value);
         message('Loading recording…');
