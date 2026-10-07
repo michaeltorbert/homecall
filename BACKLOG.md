@@ -87,6 +87,44 @@ Release stays 0.4.0; the build hash identifies the deployment. Issue #19 stays o
 
   No paid upgrade is authorized.
 
+## Archive last-known-good retention (issue #4)
+
+The source implements the change described in PRIVATE-STREAMS.md, **Archive refresh and recovery**, and in the README's Archive section. Issue #4 stays open until review, release and the gates below are recorded. Writing the code does not close it.
+
+- **ARCHIVE-PROBE-01 (open release gate):** Before production, run the authored strict parser against both real sources using the current private policy.
+  - Read the policy into local memory only. Print, persist or send nothing except the redacted per-school counts, the observation UTC and the artifact fingerprint. Writer and planner seats never read KV.
+  - Compare the default-normalized count with the strict accepted count.
+  - Any nonzero `malformed`, `policyRejected`, `duplicateConflict` or `structural` count blocks the release claim until it is diagnosed against the actual policy and source and either fixed or surfaced as a reviewed exception or user decision. There is no silent fallback to lenient parsing.
+  - A clean sample shows compatibility at that moment, not provider stability.
+  - The 2026-10-07 probe of the first artifact rejected one row per school (filename rule only), so neither school could refresh. The revised artifact adds the reviewed exclusion below. Re-run the probe on the revised artifact with the current retained ID lists. Expected result, on a snapshot where those rows are unchanged: 89 Duke and 235 VT accepted, `sourceExcluded` 1 each, and zero failing counts. Anything else blocks release.
+- **ARCHIVE-RELEASE-01 (open):** Release follows NOW-PLAYING-RELEASE-01's order. Afterwards, check that the public `/api/catalog/archive` per-school `status`/`checkedAt` survive the first scheduled run. Do not print the private document.
+- **ARCHIVE-OVERLAP-01 (accepted scope exception, see below):** Overlapping publishers are not prevented. If safe overlapping publishers are ever required, a serialized coordinator with matching storage and administration changes becomes required work, and this exception lapses.
+- **ARCHIVE-EXCLUDE-01 (exception, pending review):** two reviewed source rows are excluded by full-row digest; see the exception table and PRIVATE-STREAMS.md. If the provider changes either row, the digest stops matching and that school goes stale again; that needs a fresh diagnosis, not a broader rule.
+- **Residual, accepted:** One persistent bad eligible row (other than the two reviewed exclusions) keeps that school stale indefinitely; recordings stay playable. Renamed URL tags read as "no recording" (a feed-contract limitation, not general parser coverage). Only explicit, well-formed unsupported Duke sport IDs are ignored. Age warnings use the viewer's clock. Emergency administrative upload needs authoritative completion evidence, so it may be unavailable.
+- Native phone, game and car gates for issues #12 and #19 (DEVICE-01, CONTINUITY-01, NOW-PLAYING-01) stay open as before. This issue adds no native archive-freshness gate.
+
+Scope exceptions (each surfaced to the user before it was authored):
+
+| Requirement | Source | Proposer | Reason | Outcome |
+|---|---|---|---|---|
+| "Add tests for … concurrent builds" | Issue #4 body | Both initial planners and the coordinator (ARCH-006) | Static Pages builds never write the catalog, so the requirement applies to overlapping Worker runs. Distributed exclusion needs an atomic coordinator, a storage migration and new admin controls: new rollout and private-catalog risk for a single configured schedule. | **Tests kept, prevention excepted.** Interleaved tests assert a whole valid document, per-school timestamps bound to their own evidence and concealed public output. Named characterization tests show a lost update and a check-time regression. No exclusion, CAS, recovery horizon or healing claim. Accepted by both planners and by the independent Sol code review of the first artifact. |
+| ARCH-009: one eligible policy-rejected row fails the whole school | Agreed plan; Sol review REVIEW002 | Sol (independent reviewer); provisionally accepted by Codex; assessed by the Claude author | On the real source, one row per school fails only the filename rule (approved HTTPS origin and path, `.mp3`), and neither row is in retained history. The blanket rule would freeze 89 Duke and 235 VT approved recordings indefinitely. Loosening the URL policy, or falling back to lenient parsing, would be wrong. | **Narrow exclusion.** Only those two rows are excluded, by school-bound full-row SHA-256 checked after every other check. The ID must be absent from retained history, both addresses must be filename-only rejections, and an excluded-only result fails. All other policy failures still retain the school. URL policy and validators are unchanged. Counted as `sourceExcluded`. Pending independent review of the revised artifact and the re-run probe. |
+
+Requested-outcome ledger (author's status; "implemented" is not "verified"):
+
+| ID | Outcome | Status |
+|---|---|---|
+| OUT-01 | Per-school last-good retention across failures and deploys | Implemented with tests; unverified pending root checks and review |
+| OUT-02 | Original source time kept, stale label, never freshly relabeled | Implemented with tests; unverified pending review and real-Chrome states |
+| OUT-03 | Same school URL/schema rules, no substitution | Implemented (strict refresh, candidate checks, fail-closed stored data, URL policy unchanged). Real-source refresh depends on ARCH-009 exclusion, which is pending review; re-run probe pending (ARCHIVE-PROBE-01) |
+| OUT-04 | First deployment and absent cache are explicit | Implemented and documented; unverified pending review |
+| OUT-05 | Tests for one-school failure, recovery, invalid retained data and overlap | 05a/05b implemented; 05c prevention explicitly excepted (table above) |
+| OUT-06 | Old catalog conspicuous when schedules stop | Implemented with tests; real-Chrome states unverified |
+| OUT-07 | Manual recovery documented | Documented (PRIVATE-STREAMS.md, RELEASE-CHECKLIST.md); review pending |
+| OUT-08 | Existing behavior, concealment, no paid or dependency change | No dependency, endpoint, KV key or player change; unverified pending root's full checks |
+| OUT-09 | Specified fresh author, review and release workflow | In progress |
+| OUT-10 | Continue remaining actionable issues | Pending after issue #4 |
+
 ## Private stream rollout — released as 0.4.0 on September 19
 
 Production has run on the private gateway since September 19 (PR #11, acceptance record #12, release #15/#16). The preview Worker `homecall-private-streams-preview` remains for testing. RELEASE-CHECKLIST.md records the switch-over and rollback steps.

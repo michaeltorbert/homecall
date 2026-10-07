@@ -36,8 +36,8 @@ Plain-language checklist for the owner. Nothing here runs by itself; each step i
 
 ## Step 5 — Turn on the scheduled catalog refresh
 
-1. Set `ENABLE_CATALOG_REFRESH` to `"true"` in the top-level `vars` and deploy again. It runs every six hours and is the **only** writer to the catalog; never upload a catalog by hand while a refresh could be running (pause by setting it back to `"false"` first).
-2. After the first run, confirm the archive `checkedAt` moved and the version string did not.
+1. Set `ENABLE_CATALOG_REFRESH` to `"true"` in the top-level `vars` and deploy again. It is a single configured six-hour schedule. Overlap is not excluded, and KV has no lock. Never upload a catalog by hand unless the conditions in PRIVATE-STREAMS.md, **Recovering an old or stopped catalog**, are met: the disabled version is confirmed deployed and there is authoritative evidence that earlier invocations completed. Without that evidence, **DO NOT UPLOAD**.
+2. After the first run, confirm through `/api/catalog/archive` that each refreshed school's `checkedAt` moved, that any failed school is `stale` with its old time, and (by reading back only the version line) that the version string did not change.
 
 ## Step 6 — Switch the site over
 
@@ -49,7 +49,8 @@ Plain-language checklist for the owner. Nothing here runs by itself; each step i
 
 - Site broken, gateway fine: re-run the Pages workflow from the previous commit (Step 3, item 2).
 - Gateway broken: `wrangler rollback <previous version id> --env ""` (Step 3, item 1). The old Worker does not read the new KV binding, so the site must also go back to its previous build at the same time — do both, in either order, within minutes.
-- Bad catalog: set `ENABLE_CATALOG_REFRESH` to `"false"` and deploy, then upload the rollback copy from Step 2, then re-enable.
+- Bad catalog: set `ENABLE_CATALOG_REFRESH` to `"false"`, deploy, and confirm that the disabled version is the one deployed. Upload the rollback copy from Step 2 only with authoritative evidence that earlier scheduled invocations have completed; a quiet tail, elapsed time or matching digest is not evidence. Without it, **DO NOT UPLOAD**: stop and escalate. Re-enable after the upload. The rollback copy keeps its original check times; never re-stamp them.
+- Archive list getting old (the site says it is more than 12 hours old): check that the schedule is deployed and enabled, restore it if needed, and wait for a scheduled run. See PRIVATE-STREAMS.md for the recovery steps. There is no manual refresh command.
 - Leaked key suspicion: generate a new key (Step 1, item 3) and deploy; every outstanding capability stops working immediately and players reconnect on their own.
 
 ## What this checklist does not do

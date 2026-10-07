@@ -6,7 +6,6 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "start": "node server.mjs",
-    "refresh:archive": "node scripts/refresh-archive.mjs",
     "build": "npm run check:gateway && node scripts/check-private-urls.mjs && vite build && node scripts/check-private-urls.mjs --dist",
     "check:gateway": "node scripts/check-gateway.mjs",
     "worker:dev": "wrangler dev --local --env local --ip 127.0.0.1 --port 8787",
