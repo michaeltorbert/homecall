@@ -27,7 +27,8 @@ const upstream = async request => {
   if (url.searchParams.get('event') === '3') return new FixtureResponse('<html>invalid</html>', { headers: { 'Content-Type': 'text/html' } });
   if (url.searchParams.get('event') === '4') return new FixtureResponse(' '.repeat(2 * 1024 * 1024 + 1), { headers: { 'Content-Type': 'application/json' } });
   if (url.pathname.endsWith('/summary')) return FixtureResponse.json({header:{id:url.searchParams.get('event'),uid:`s:20~l:23~e:${url.searchParams.get('event')}`,league:{id:'23',slug:'college-football'},season:{year:2026},competitions:[{id:url.searchParams.get('event'),competitors:[{team:{id:'150'}},{team:{id:'356'}}]}]},drives:{previous:[],current:{plays:[]}}}, {headers:{Date:new Date().toUTCString(),Age:'2'}});
-  if (url.pathname.endsWith('/schedule')) return FixtureResponse.json({team:{id:'150'},season:{year:2026},events:[]});
+  if (url.pathname.endsWith('/schedule')) return FixtureResponse.json({team:{id:'150'},season:{year:2026},events:[{id:'401858255',date:'2026-10-10T19:30Z',season:{year:2026},competitions:[{id:'401858255',competitors:[{id:'150',team:{id:'150',location:'Duke'}},{id:'2390',team:{id:'2390',location:'Tulane'}}],
+    status:{clock:0,displayClock:'0:00',period:0,type:{id:'1',name:'STATUS_SCHEDULED',state:'pre',completed:false,description:'Scheduled',detail:'Sat, October 10th at 3:30 PM EDT',shortDetail:'10/10 - 3:30 PM EDT'}}}]}]}, {headers:{Date:new Date().toUTCString(),Age:'1'}});
   if (url.pathname.includes('/games/')) return FixtureResponse.json({success:true,games:[]});
   if (url.hostname.includes('espn.com')) return FixtureResponse.json({sports:[{leagues:[{teams:[]}]}]});
   return FixtureResponse.json({success:true,teams:[{team_id:uuid,school_name:'Georgia Tech'}]});
@@ -103,6 +104,23 @@ try {
   assert.ok(hit.ageMs > first.ageMs);
   assert.equal(calls, before + 1, 'Cache hit must avoid another fixture upstream call');
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), null);
+  const statusBefore = calls;
+  const statusFirst = await request('/api/sync/status/150/2026', { headers: { Origin: origin, Authorization: 'do-not-forward', Cookie: 'do-not-forward' } });
+  assert.equal(statusFirst.status, 200);
+  assert.equal(statusFirst.headers.get('Access-Control-Allow-Origin'), origin);
+  assert.equal(statusFirst.headers.get('Cache-Control'), 'no-store');
+  const statusData = await statusFirst.json();
+  assert.deepEqual(Object.keys(statusData), ['schemaVersion','teamId','season','checkedAt','ageMs','events']);
+  assert.deepEqual([statusData.schemaVersion, statusData.teamId, statusData.season], [1, '150', 2026]);
+  assert.deepEqual(statusData.events, [{id:'401858255',start:Date.parse('2026-10-10T19:30:00Z'),teams:['Duke','Tulane'],teamIds:['150','2390'],season:2026,status:'upcoming'}]);
+  assert.ok(statusData.ageMs >= 2000, 'Age plus Date precision');
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const statusHit = await (await request('/api/sync/status/150/2026')).json();
+  assert.equal(statusHit.checkedAt, statusData.checkedAt);
+  assert.ok(statusHit.ageMs > statusData.ageMs);
+  assert.equal(calls, statusBefore + 1, 'Status cache hit must avoid another fixture upstream call');
+  for (const target of ['/api/sync/status/356/2026', '/api/sync/status/150/2026?season=2025', '/api/sync/status/%31%35%30/2026']) assert.equal((await request(target)).status, 404, target);
+  assert.equal(calls, statusBefore + 1, 'Unsupported status targets never reach upstream');
   assert.equal((await request('/api/sync/teams', { headers: { Origin: 'null' } })).status, 403);
   assert.equal((await request('/api/sync/teams?host=evil')).status, 404);
   assert.equal((await request('/api/sync/%74eams')).status, 404);
@@ -118,6 +136,6 @@ try {
   const runtime = await (await probe.fetch('https://probe.invalid')).json();
   assert.deepEqual(runtime, {timeout:true,cancelled:true,cache:'no-store',credentials:'omit',redirect:'manual',combinedSignal:true});
   console.log(JSON.stringify({ result: 'PASS', workerd: JSON.parse(readFileSync('node_modules/workerd/package.json')).version,
-    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'five HTTP route families', 'array and plays body shapes', 'cache hit and age recomputation', 'per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility'],
+    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'six HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility'],
     limitation: 'Local workerd with fixture upstreams; no deployed cache, platform CPU, browser HLS or account entitlement proof.' }, null, 2));
 } finally { await mf.dispose(); }

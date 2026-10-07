@@ -18,29 +18,68 @@ const upstream = url => {
 const makeRequest = (target, options) => new Request(`https://gateway.example${target}`,options);
 const fetcher = async url => Response.json(upstream(String(url)));
 
-test('shared router serves exactly five minimized route families and timing age in both deliveries', async () => {
-  for (const target of ['/api/homestream/teams',`/api/homestream/games/${uuid}`,'/api/sync/teams','/api/sync/schedule/150/2026','/api/sync/plays/401856671']) {
+test('shared router serves exactly six minimized route families and timing age in both deliveries', async () => {
+  for (const target of ['/api/homestream/teams',`/api/homestream/games/${uuid}`,'/api/sync/teams','/api/sync/schedule/150/2026','/api/sync/plays/401856671','/api/sync/status/150/2026']) {
     let wall = 100000;
     const response = await metadataGateway(makeRequest(target), {fetcher, catalog, now:()=>wall++});
     assert.equal(response.status,200);
     assert.equal(response.headers.get('Cache-Control'),'no-store');
     const data = await response.json();
     if (target.includes('/plays/')) { assert.ok(data.checkedAt >= 100000); assert.equal(data.ageMs,null); assert.equal(data.schemaVersion,2); assert.equal(data.eventId,'401856671'); }
+    else if (target.includes('/status/')) { assert.deepEqual(data,{schemaVersion:1,teamId:'150',season:2026,checkedAt:data.checkedAt,ageMs:null,events:[]}); assert.ok(data.checkedAt >= 100000); }
     else assert.ok(Array.isArray(data));
   }
+});
+test('status route admits only the four verified provider teams and exact season paths, before upstream', async () => {
+  let calls = 0;
+  const counting = async url => { calls++; return fetcher(url); };
+  for (const target of ['/api/sync/status/356/2026','/api/sync/status/1500/2026','/api/sync/status/0150/2026','/api/sync/status/15/2026','/api/sync/status/150/1999','/api/sync/status/150/20261','/api/sync/status/150','/api/sync/status/150/2026/','/api/sync/status/150/2026?x=1','/api/sync/status/%31%35%30/2026','/api/sync/status/150/%32026']) {
+    assert.equal((await metadataGateway(makeRequest(target),{fetcher:counting})).status,404,target);
+  }
+  assert.equal(calls,0);
+  for (const id of ['150','59','258','2']) assert.equal((await metadataGateway(makeRequest(`/api/sync/status/${id}/2026`),{fetcher:async url=>{calls++;return Response.json({...upstream(String(url)),team:{id}});}})).status,200,id);
+  assert.equal(calls,4);
+});
+test('status cache lives ten seconds, recomputes age per delivery, keeps unknown age unknown, and never serves expired data after failure',async()=>{
+  let now=1_000_000_000_000,calls=0,stored,dated=true;const pending=[];
+  const cache={match:async()=>stored?.clone(),put:async(key,response)=>{assert.match(key.url,/__metadata_cache_v2\/api\/sync\/status\//);stored=response;}};
+  const options={cache,ctx:{waitUntil:p=>pending.push(p)},now:()=>now,fetcher:async url=>{calls++;return Response.json(upstream(String(url)),{headers:dated?{Date:new Date(now-10000).toUTCString()}:{}});}};
+  const first=await (await metadataGateway(makeRequest('/api/sync/status/150/2026',{headers:{Origin:PRODUCTION_ORIGIN}}),options)).json();
+  assert.equal(first.ageMs,11000);await Promise.all(pending);
+  now+=9999;
+  const hit=await metadataGateway(makeRequest('/api/sync/status/150/2026'),options);const data=await hit.json();
+  assert.equal(calls,1);assert.equal(data.checkedAt,first.checkedAt);assert.equal(data.ageMs,20999);assert.equal(hit.headers.get('Access-Control-Allow-Origin'),null);
+  now+=1;
+  assert.equal((await metadataGateway(makeRequest('/api/sync/status/150/2026'),{...options,fetcher:async()=>{throw Error();}})).status,502,'expired entry is never a stale fallback');
+  dated=false;stored=undefined;
+  const unknown=await (await metadataGateway(makeRequest('/api/sync/status/150/2026'),options)).json();
+  assert.equal(unknown.ageMs,null);await Promise.all(pending);now+=5000;
+  assert.equal((await (await metadataGateway(makeRequest('/api/sync/status/150/2026'),{...options,fetcher:async()=>{throw Error('cache should avoid upstream');}})).json()).ageMs,null);
 });
 test('Worker HTTP boundary rejects full queries, encoding, media, hosts, invalid IDs and methods before upstream', async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => { calls++; throw Error('unexpected fetch'); };
   try {
-    for (const target of ['/api/sync/teams?host=evil','/api/sync/teams?','/api/sync/%74eams','/api/sync/plays/1?event=2','/api/sync/plays/https://evil.test','/api/sync/plays/1234567890123',`/api/homestream/games/${'-'.repeat(36)}`,`/api/homestream/games/${uuid}?url=https://evil.test`,'/api/duke','/media/a.m3u8','/api/sync/teams/']) {
+    for (const target of ['/api/sync/teams?host=evil','/api/sync/teams?','/api/sync/%74eams','/api/sync/plays/1?event=2','/api/sync/plays/https://evil.test','/api/sync/plays/1234567890123',`/api/homestream/games/${'-'.repeat(36)}`,`/api/homestream/games/${uuid}?url=https://evil.test`,'/api/duke','/media/a.m3u8','/api/sync/teams/','/api/sync/status/356/2026','/api/sync/status/150/2026?season=2025']) {
       const response = await worker.fetch(makeRequest(target),{ALLOWED_ORIGINS:JSON.stringify([PRODUCTION_ORIGIN])},{});
       assert.equal(response.status,404,target);
     }
     for (const method of ['HEAD','POST','PUT','DELETE']) assert.equal((await worker.fetch(makeRequest('/api/sync/teams',{method}),{ALLOWED_ORIGINS:JSON.stringify([PRODUCTION_ORIGIN])},{})).status,405);
     assert.equal(calls,0);
   } finally { globalThis.fetch = originalFetch; }
+});
+test('Worker diagnostics name the status route family without exposing the target', async () => {
+  const originalFetch = globalThis.fetch, originalWarn = console.warn, records = [];
+  globalThis.fetch = async () => { throw Error('private upstream detail'); };
+  console.warn = line => records.push(JSON.parse(line));
+  try {
+    const response = await worker.fetch(makeRequest('/api/sync/status/150/2026'),{ALLOWED_ORIGINS:JSON.stringify([PRODUCTION_ORIGIN])},{});
+    assert.equal(response.status,502);
+    assert.ok(records.length > 0);
+    assert.ok(records.every(record => record.event === 'metadata-failure' && record.route === 'api/sync/status'));
+    assert.ok(!JSON.stringify(records).includes('private') && !JSON.stringify(records).includes('/150/'));
+  } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
 });
 test('CORS exact origins and restricted preflight are checked without credential forwarding', async () => {
   let calls=0;
