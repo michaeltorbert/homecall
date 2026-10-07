@@ -93,7 +93,7 @@ games stops the previous feed and cancels pending discovery.
 
 The gateway owns provider discovery and media transport. The browser receives stable stream IDs and gateway URLs; it never receives upstream media addresses in catalog JSON or playlist references. Audio still reaches the listener, so this is address concealment rather than copy protection. Official attribution links remain public.
 
-See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for configuration, rollout gates and local development. This implementation has not replaced the production gateway until the separate rollout checks are satisfied. Provider availability and permitted relay use remain acceptance gates.
+See [PRIVATE-STREAMS.md](PRIVATE-STREAMS.md) for configuration, rollout gates and local development. Production has used this gateway since the September 19, 2026 cutover, which published site build `0.3.0+659fcd4` ([#12 cutover record](https://github.com/michaeltorbert/homecall/issues/12#issuecomment-5747055903)); the October 7, 2026 issue #4 release ([PR #23](https://github.com/michaeltorbert/homecall/pull/23)) recorded Worker `a7d22be2` and Pages `0.4.0+bc6892c`. Later releases change what is served, so check the live deployment rather than this record. The cutover was a one- or two-listener pilot by the owner's choice, not full acceptance. Provider availability, permitted relay use, production phone listening and account capacity remain open acceptance items in [#12](https://github.com/michaeltorbert/homecall/issues/12); see BACKLOG **Private stream rollout**.
 
 ### Sync tab (experimental)
 
