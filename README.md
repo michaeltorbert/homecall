@@ -125,6 +125,36 @@ local clocks, and hidden-tab transitions invalidate timing. Returning to the
 visible tab requires a fresh lookup; manual audio adjustment remains available. Out-of-order provider timestamps remain explicitly
 unverified, never interpolated into a continuously ticking game clock.
 
+**Game status labels.** Each Sync game option starts with **LIVE**,
+**Upcoming**, **Completed** or **Status unavailable**, followed by the existing
+date, opponent and feed notice. The labels come from
+`/api/sync/status/<team-id>/<year>`, a GET route limited to the four verified
+provider team IDs. It reads the same ESPN team schedule and returns schema 1:
+`teamId`, `season`, `checkedAt`, `ageMs` and events containing only identity
+fields plus a status of `live`, `upcoming`, `completed` or `unknown`. The
+gateway caches it for 10 seconds and recomputes age on every delivery; an
+expired entry is never served after a failure. Only these provider triples are
+confident: `STATUS_SCHEDULED`/`pre`/not completed (Upcoming),
+`STATUS_IN_PROGRESS` or `STATUS_HALFTIME`/`in`/not completed (LIVE), and
+`STATUS_FINAL`/`post`/completed (Completed). Final and scheduled shapes were
+observed in the public schedule; the in-progress and halftime shapes are the
+supported contract, not yet observed live. Any other name (postponed, canceled,
+delayed or new), a malformed status, or event- and competition-level copies that
+disagree is unknown. Labels never come from kickoff time or feed state.
+
+The page polls up to the two most recent catalog seasons, one request at a time
+per season. It polls every 15 seconds after success, and after failures waits
+30, 60, then 120 seconds. A label uses the same 45-second budget as service
+timing: upstream age, cache residence, request duration and local elapsed time
+all count. Unknown age, a failed or slow refresh, or a clock step shows
+**Status unavailable**. So do games without a kickoff time, games in older
+seasons, and ambiguous matches, including two catalog games that claim the same
+event. Hiding the tab or leaving Sync stops polling. Status updates change only
+the option text; they never start, stop or reload audio, change the selected
+game, or touch calibration, timing source or play anchors. LIVE means the
+sports-data source reports the game in progress. It can lag the actual game, and
+it does not mean a feed is published or playable.
+
 Sync uses HLS.js playback positions, not Live's PCM buffer. In browsers falling
 back to native HLS, audio and manual seeking may work but this implementation
 cannot expose the program timestamp, so game-clock mapping stays unavailable.

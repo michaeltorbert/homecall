@@ -5,6 +5,7 @@ import {JSDOM} from 'jsdom';
 import { metadataURL } from '../src/gateway.js';
 import { createTimingFreshness, nextPollDelay } from '../src/timing-freshness.js';
 import * as mapping from '../src/sync-mapping.js';
+import { createGameStatus } from '../src/game-status.js';
 const source=fs.readFileSync(new URL('../src/sync.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export function','function');
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const tick=()=>new Promise(r=>setImmediate(r));
@@ -27,7 +28,7 @@ function harness(t,{delayTeams=false,duplicate=false,ageMs=0,requestMs=0,delayPl
   localNow+=requestMs;const value={schemaVersion:2,eventId:wrongEvent?'other':'event',teamIds:['150','356'],season:mapping.footballSeason(base),plays:plays.map(p=>({...p})),conflict:true,checkedAt:base,ageMs};
   return delayPlays?new Promise(resolve=>resolvePlays=()=>resolve(value)):value;
  };
- Object.assign(w,{...mapping,metadataURL,createTimingFreshness:()=>createTimingFreshness({clock:()=>({wall:localNow,mono:localNow})}),nextPollDelay,browserTiming:async path=>{browserRequests.push(path);return readJSON(new URL('/api/'+path,'https://browser-provider.test'));},SyncPlayer:FakePlayer,readJSON,setupHomestream:callbacks=>(catalog={ready:null,setEnabled(v){this.ready=v?game:null;if(v){callbacks.onChange();callbacks.onReady()}},async refresh(){callbacks.onChange();callbacks.onReady()}})});
+ Object.assign(w,{...mapping,metadataURL,createTimingFreshness:()=>createTimingFreshness({clock:()=>({wall:localNow,mono:localNow})}),nextPollDelay,browserTiming:async path=>{browserRequests.push(path);return readJSON(new URL('/api/'+path,'https://browser-provider.test'));},SyncPlayer:FakePlayer,readJSON,createGameStatus:options=>createGameStatus({...options,setTimer:()=>null,clearTimer:()=>{}}),setupHomestream:callbacks=>(catalog={ready:null,relabel(){},setEnabled(v){this.ready=v?game:null;if(v){callbacks.onChange();callbacks.onReady()}},async refresh(){callbacks.onChange();callbacks.onReady()}})});
  let liveStops=0;w.eval(source+';window.setup=setupSync;');const ui=w.setup({stopLive:()=>{liveStops++;}});w.document.getElementById('sync-timing-source').value=timingSource;return{ui,w,player,game,timers,requests,browserRequests,plays,liveStops:()=>liveStops,recoverSchedule:()=>failSchedule=false,advance:ms=>localNow+=ms,fail:()=>failPlays=true,recover:()=>failPlays=false,resolvePlays:()=>resolvePlays(),get catalog(){return catalog},resolveTeams:x=>resolveTeams(x),$:id=>w.document.getElementById('sync-'+id)};
 }
 test('Sync exposes all catalog schools, applies bounded clock and leaves outside requests unchanged',async t=>{

@@ -22,7 +22,7 @@
 <p class="eyebrow">MATCH THE CALL TO YOUR TV</p><h1>Sync <span class="badge">Experimental</span></h1>
 <p>Choose a broadcast and timing source, then find a recorded play using the clock on your TV. Confirm its description before moving audio, and fine-tune by ear.</p>
 <label for="sync-team">School</label><select id="sync-team" disabled></select><p id="sync-team-note" role="status"></p><button id="sync-teams-retry">Reload schools</button>
-<section id="sync-game-panel" hidden><label for="sync-game">Football game</label><select id="sync-game" disabled></select><p id="sync-game-note" role="status"></p><button id="sync-game-refresh">Refresh games</button></section>
+<section id="sync-game-panel" hidden><label for="sync-game">Football game</label><select id="sync-game" disabled aria-describedby="sync-game-status-help"></select><p id="sync-game-status-help">LIVE, Upcoming and Completed are reported by the sports-data source and can lag the actual game. They do not mean a feed is published or playable.</p><p id="sync-game-note" role="status"></p><button id="sync-game-refresh">Refresh games</button></section>
 <h2 id="sync-title">Choose a game</h2><audio id="sync-audio" controls preload="none"></audio>
 <div class="sync-times"><p>Last recorded play at this audio position <strong id="sync-mapped">No matching play anchor</strong></p><p>Audio real time <strong id="sync-audio-time">Start audio to see its timestamp</strong></p><p>Current time <span id="sync-now">—</span></p><p>Recorded plays inside the audio window <strong id="sync-range">Start playback to see the range</strong></p><small id="sync-range-note"></small></div>
 <p id="sync-mapping-note" role="status"></p>

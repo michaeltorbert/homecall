@@ -8,11 +8,14 @@ const messages = {
   unavailable: 'The feed could not be checked. Refresh to retry or use the official listening site.',
   ready: 'Live playlist confirmed. Press Play, then match the audio to your TV.'
 };
-export function setupHomestream({ onChange, onReady, read = readJSON, probe = checkPlaylist, prefix = '', school = () => 'Georgia Tech' }) {
+// onGames/onCatalogInvalidated are optional label hooks; they never affect readiness or playback.
+export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidated, read = readJSON, probe = checkPlaylist, prefix = '', school = () => 'Georgia Tech' }) {
   const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
   const $ = id => document.getElementById(prefix + id);
   let controller, games = [], ready = null, enabled = false;
+  const baseLabels = new WeakMap();
   const cancel = () => { controller?.abort(); controller = null; ready = null; };
+  const invalidate = () => { try { onCatalogInvalidated?.(); } catch { /* Optional labels cannot block the catalog. */ } };
   const begin = () => { cancel(); onChange(); controller = new AbortController(); return controller.signal; };
   async function check(game, signal) {
     $('game-note').textContent = game?.url ? 'Checking that the live playlist is advancing…' : messages.unpublished;
@@ -25,6 +28,7 @@ export function setupHomestream({ onChange, onReady, read = readJSON, probe = ch
   async function refresh() {
     if (!enabled) return;
     const previous = $('game').value, signal = begin();
+    invalidate();
     games = []; $('game').replaceChildren();
     $('game').disabled = true; $('game-refresh').disabled = true;
     $('game-note').textContent = `Loading ${school()} games…`;
@@ -47,10 +51,12 @@ export function setupHomestream({ onChange, onReady, read = readJSON, probe = ch
       for (const g of games) {
         const option = document.createElement('option'); option.value = g.id;
         option.textContent = `${g.start === null ? g.date || 'Date pending' : new Date(g.start).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} · vs ${g.opponent}${g.url ? '' : ' · feed not published'}`;
+        baseLabels.set(option, option.textContent);
         $('game').append(option);
       }
       if (!current) { $('game-note').textContent = `No ${school()} football games are listed. Refresh later.`; onReady(); return; }
       $('game').value = current.id;
+      try { onGames?.(games.map(({id, opponent, start}) => ({id, opponent, start})), {teamId: team.id}); } catch { /* Labels are optional. */ }
       await check(current, signal);
     } catch {
       if (!signal.aborted) { $('game-note').textContent = 'The game catalog could not load. Refresh to retry. This host needs the Homecall catalog service.'; onReady(); }
@@ -67,7 +73,17 @@ export function setupHomestream({ onChange, onReady, read = readJSON, probe = ch
   return {
     get ready() { return ready; },
     refresh,
-    setEnabled(value) { enabled = value; cancel(); $('game-panel').hidden = !value; if (value) refresh(); },
+    setEnabled(value) { enabled = value; cancel(); invalidate(); $('game-panel').hidden = !value; if (value) refresh(); },
     stop() { controller?.abort(); controller = null; $('game').disabled = !games.length; $('game-refresh').disabled = false; },
+    // Text only: value, order, selection, disabled state, focus and readiness are untouched.
+    relabel(labels) {
+      for (const option of $('game').options) {
+        const base = baseLabels.get(option);
+        if (base === undefined) continue;
+        const prefix = labels.get(option.value);
+        const text = prefix ? `${prefix} · ${base}` : base;
+        if (option.textContent !== text) option.textContent = text;
+      }
+    },
   };
 }

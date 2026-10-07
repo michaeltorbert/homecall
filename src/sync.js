@@ -3,6 +3,7 @@ import { createTimingFreshness, nextPollDelay } from './timing-freshness.js';
 import { metadataURL } from './gateway.js';
 import { readJSON } from './homestream.js';
 import { setupHomestream } from './homestream-ui.js';
+import { createGameStatus } from './game-status.js';
 import { SyncPlayer } from './sync-player.js';
 import { schoolKey, footballSeason, matchEvent, availableAnchors, selectAnchors, gameOrder, playLabel } from './sync-mapping.js';
 export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } = {}) {
@@ -73,13 +74,15 @@ export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } 
       if (!signal.aborted) { retry.hidden = false; $('mapping-note').textContent = transport === 'gateway' ? 'The Homecall timing service is unavailable for this game. Choose ESPN recorded plays below, retry timing, or adjust audio manually.' : 'No unique supported game timing is available. Retry timing without restarting audio, or adjust the audio manually.'; }
     }
   }
+  // Label-only status: independent of audio, timing source, calibration, anchors and selection.
+  const gameStatus = createGameStatus({ read: (path, options) => readJSON(api(path), options), enabled: () => active && document.visibilityState !== 'hidden', onUpdate: labels => catalog.relabel(labels) });
   const catalog = setupHomestream({prefix:'sync-',school,onChange:reset,onReady:() => {
     if (catalog.ready) {
       const selected = `${$('team').value}:${catalog.ready.id}:${catalog.ready.url}`;
       if (selected !== selectionKey) { $('offset').value = '0'; calibrationKey = null; selectionKey = selected; }
       $('title').textContent = `${school()} vs ${catalog.ready.opponent}`; loadMapping(catalog.ready); }
     render();
-  }});
+  }, onGames:(games, {teamId}) => gameStatus.setGames({games, teamId, school:school()}), onCatalogInvalidated:() => gameStatus.clear()});
   function render() {
     const timing = player.timing(), fresh = freshness.fresh();
     const ageLabel = freshness.status() === 'unknown' ? 'freshness unknown' : 'stale data';
@@ -148,14 +151,15 @@ export function setupSync({ initialSchool = () => 'Duke', stopLive = () => {} } 
   $('offset').oninput = () => { clearChoices(); render(); };
   document.addEventListener('visibilitychange', () => {
     freshness.invalidate();
+    if (document.visibilityState === 'hidden') gameStatus.suspend(); else gameStatus.resume();
     if (!active) return;
     clearMapping();
     if (document.visibilityState === 'visible' && catalog.ready) void loadMapping(catalog.ready);
     render();
   });
-  setInterval(() => { if (active) render(); },1000);
+  setInterval(() => { if (active) { render(); gameStatus.tick(); } },1000);
   return {
     activate() { active = true; reset(); loadTeams(); },
-    deactivate() { active = false; teamsController?.abort(); catalog.setEnabled(false); reset(); },
+    deactivate() { active = false; teamsController?.abort(); catalog.setEnabled(false); gameStatus.stop(); reset(); },
   };
 }
