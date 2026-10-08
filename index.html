@@ -3,45 +3,56 @@
 <body><header><a class="brand" href="./">Homecall<span>YOUR TEAM’S CALL</span></a><span class="badge">Manual sync · v1</span></header>
 <nav class="mode-tabs" role="tablist" aria-label="Broadcast mode"><button id="live-tab" role="tab" aria-selected="true" aria-controls="live-panel">Live</button><button id="sync-tab" role="tab" aria-selected="false" aria-controls="sync-panel" tabindex="-1">Sync</button><button id="archive-tab" role="tab" aria-selected="false" aria-controls="archive-panel" tabindex="-1">Archive</button></nav>
 <main><section id="live-panel" role="tabpanel" aria-labelledby="live-tab" class="console">
+<div class="live-source">
 <div class="team-row"><label for="team">Your team</label><select id="team"><option value="duke">Duke · Blue Devils</option><option value="miami">Miami · Hurricanes</option><option value="vt">Virginia Tech · Hokies</option><option value="gt">Georgia Tech · Yellow Jackets</option></select></div>
-<section id="game-panel" hidden><label for="game">Football game</label><select id="game" disabled></select><p id="game-note" role="status"></p><button id="game-refresh">Refresh games</button></section>
+<section id="game-panel" hidden><label for="game">Football game</label><select id="game" disabled></select><div class="field-meta"><p id="game-note" role="status"></p><button id="game-refresh">Refresh games</button></div></section>
 <div class="station-row"><div><p class="eyebrow">INTERNET AUDIO</p><h1 id="station">Duke Sports Network</h1></div><span id="status" role="status">Disconnected</span></div>
 <div id="feed-picker" class="feed-picker" hidden><label for="feed">Audio feed</label><select id="feed" aria-describedby="feed-help"></select><p id="feed-help">Changing feeds stops playback. Press Play to start the new feed at 0 seconds, then check alignment.</p></div>
+</div>
+<div class="live-playback">
 <div class="transport"><button id="connect" class="primary">Play Duke audio</button><button id="pause" disabled>Pause audio</button><button id="stop" disabled aria-label="Disconnect audio">Stop</button></div>
 <button id="resume-position" hidden>TV paused too? Resume where I stopped</button>
 <div class="delay-display"><p>Audio delay you’ve added</p><div><output id="delay">0.00</output><span>seconds</span></div><p id="buffer">History fills as you listen · up to 3 minutes</p></div>
 <label class="range-label" for="scrub"><span>Delay</span><output id="scrub-label">0.00 s</output></label><input id="scrub" type="range" min="0" max="0" step="0.25" value="0" disabled>
-<div class="nudge-labels"><span>Call is late? Less delay</span><span>Call is early? More delay</span></div>
-<div class="nudges"><button data-nudge="-5" disabled aria-label="Reduce delay by 5 seconds">−5 s</button><button data-nudge="-1" disabled aria-label="Reduce delay by 1 second">−1 s</button><button data-nudge="-0.25" disabled aria-label="Reduce delay by a quarter second">−¼ s</button><button data-nudge="0.25" disabled aria-label="Add a quarter second delay">+¼ s</button><button data-nudge="1" disabled aria-label="Add 1 second delay">+1 s</button><button data-nudge="5" disabled aria-label="Add 5 seconds delay">+5 s</button></div>
+<div class="nudge-block"><div class="nudge-labels"><span>Call is late? Less delay</span><span>Call is early? More delay</span></div>
+<div class="nudges"><button data-nudge="-5" disabled aria-label="Reduce delay by 5 seconds">−5 s</button><button data-nudge="-1" disabled aria-label="Reduce delay by 1 second">−1 s</button><button data-nudge="-0.25" disabled aria-label="Reduce delay by a quarter second">−¼ s</button><button data-nudge="0.25" disabled aria-label="Add a quarter second delay">+¼ s</button><button data-nudge="1" disabled aria-label="Add 1 second delay">+1 s</button><button data-nudge="5" disabled aria-label="Add 5 seconds delay">+5 s</button></div></div>
 <div class="secondary-row"><button id="live" disabled>Jump to incoming audio</button><span id="alignment">Not yet aligned</span></div>
+</div>
 <section class="sync"><div><h2>Match a play</h2><p id="sync-help">When the call comes before the picture, tap as you hear a distinct play. Tap again when you see it on TV.</p></div><button id="hold" class="primary" disabled>I heard the play · hold audio</button><button id="cancel" hidden>Cancel match</button><button id="confirm" disabled>Sounds aligned ✓</button></section>
 <p id="notice" class="notice" role="status" aria-live="polite">Pick a team and press Play. Keep this page open while listening.</p>
 <div class="volume"><label for="volume">Volume</label><input id="volume" type="range" min="0" max="1" step="0.01" value="0.8"></div>
 </section>
 <section id="sync-panel" role="tabpanel" aria-labelledby="sync-tab" class="console" hidden>
-<p class="eyebrow">MATCH THE CALL TO YOUR TV</p><h1>Sync <span class="badge">Experimental</span></h1>
-<p>Choose a broadcast and timing source, then find a recorded play using the clock on your TV. Confirm its description before moving audio, and fine-tune by ear.</p>
-<label for="sync-team">School</label><select id="sync-team" disabled></select><p id="sync-team-note" role="status"></p><button id="sync-teams-retry">Reload schools</button>
-<section id="sync-game-panel" hidden><label for="sync-game">Football game</label><select id="sync-game" disabled aria-describedby="sync-game-status-help"></select><p id="sync-game-status-help">LIVE, Upcoming and Completed are reported by the sports-data source and can lag the actual game. They do not mean a feed is published or playable.</p><p id="sync-game-note" role="status"></p><button id="sync-game-refresh">Refresh games</button></section>
+<div class="panel-head"><p class="eyebrow">MATCH THE CALL TO YOUR TV</p><h1>Sync <span class="badge">Experimental</span></h1>
+<p>Choose a broadcast and timing source, then find a recorded play using the clock on your TV. Confirm its description before moving audio, and fine-tune by ear.</p></div>
+<div class="panel-group sync-choose">
+<label for="sync-team">School</label><select id="sync-team" disabled></select><div class="field-meta"><p id="sync-team-note" role="status"></p><button id="sync-teams-retry">Reload schools</button></div>
+<section id="sync-game-panel" hidden><label for="sync-game">Football game</label><select id="sync-game" disabled aria-describedby="sync-game-status-help"></select><p id="sync-game-status-help">LIVE, Upcoming and Completed are reported by the sports-data source and can lag the actual game. They do not mean a feed is published or playable.</p><div class="field-meta"><p id="sync-game-note" role="status"></p><button id="sync-game-refresh">Refresh games</button></div></section>
+</div>
+<div class="panel-group sync-listen">
 <h2 id="sync-title">Choose a game</h2><audio id="sync-audio" controls preload="none"></audio>
+<div class="transport"><button id="sync-play" class="primary" disabled>Play / reconnect feed</button><button id="sync-stop" disabled>Stop</button></div><p id="sync-playback" role="status">Stopped.</p>
+</div>
+<div class="panel-group sync-find">
 <div class="sync-times"><p>Last recorded play at this audio position <strong id="sync-mapped">No matching play anchor</strong></p><p>Audio real time <strong id="sync-audio-time">Start audio to see its timestamp</strong></p><p>Current time <span id="sync-now">—</span></p><p>Recorded plays inside the audio window <strong id="sync-range">Start playback to see the range</strong></p><small id="sync-range-note"></small></div>
-<p id="sync-mapping-note" role="status"></p>
+<div class="sync-source"><p id="sync-mapping-note" role="status"></p></div>
+<div class="sync-work">
 <form id="sync-clock-form" class="sync-clock-form"><div><label for="sync-quarter">Quarter</label><select id="sync-quarter"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select></div><div><label for="sync-clock">TV game clock</label><input id="sync-clock" inputmode="numeric" placeholder="7:29" autocomplete="off"></div><button id="sync-apply" class="primary" disabled>Find recorded play</button></form>
+<div class="sync-manual"><p class="sync-direction">Move audio back to add delay; move it ahead to reduce delay.</p><div class="nudges"><button data-sync-nudge="-1" disabled>Back 1 s</button><button data-sync-nudge="-0.25" disabled>Back ¼ s</button><button data-sync-nudge="0.25" disabled>Ahead ¼ s</button><button data-sync-nudge="1" disabled>Ahead 1 s</button></div><button id="sync-incoming" disabled>Jump to incoming audio</button></div>
 <p id="sync-result" role="status"></p><div id="sync-matches" class="sync-matches"></div>
-<div class="transport"><button id="sync-play" class="primary" disabled>Play / reconnect feed</button><button id="sync-stop" disabled>Stop</button><button id="sync-incoming" disabled>Jump to incoming audio</button></div><p id="sync-playback" role="status">Stopped.</p>
-<p>Move audio back to add delay; move it ahead to reduce delay.</p><div class="nudges"><button data-sync-nudge="-1" disabled>Back 1 s</button><button data-sync-nudge="-0.25" disabled>Back ¼ s</button><button data-sync-nudge="0.25" disabled>Ahead ¼ s</button><button data-sync-nudge="1" disabled>Ahead 1 s</button></div>
-<details><summary>Timing adjustment</summary><label for="sync-offset">Audio timestamp offset (seconds)</label><input id="sync-offset" type="number" value="0" step="0.25"><p>Positive values seek later than the reported play timestamp. Adjust only after comparing a distinct play with the commentary. This does not calibrate automatic synchronization.</p></details>
+</div>
+</div>
+<details class="sync-adjust"><summary>Timing adjustment</summary><label for="sync-offset">Audio timestamp offset (seconds)</label><input id="sync-offset" type="number" value="0" step="0.25"><p>Positive values seek later than the reported play timestamp. Adjust only after comparing a distinct play with the commentary. This does not calibrate automatic synchronization.</p></details>
 </section>
 <section id="archive-panel" role="tabpanel" aria-labelledby="archive-tab" class="console" hidden>
-<p class="eyebrow">THE CALLS WORTH COMING BACK TO</p><h1>Archive</h1><p>Pick your school. Find a past game. Hear it again.</p>
-<label for="archive-team">School</label><select id="archive-team"><option value="duke">Duke</option><option value="miami">Miami</option><option value="vt">Virginia Tech</option></select>
-<div class="archive-filters"><div><label for="archive-sport">Sport</label><select id="archive-sport"><option value="">All sports</option></select></div><div><label for="archive-year">Year</label><select id="archive-year"><option value="">All years</option></select></div></div>
-<p id="archive-note" role="status">Loading recordings…</p><button id="archive-retry">Refresh list</button>
+<div class="panel-head"><p class="eyebrow">THE CALLS WORTH COMING BACK TO</p><h1>Archive</h1><p>Pick your school. Find a past game. Hear it again.</p></div>
+<div class="archive-filters"><div class="archive-school"><label for="archive-team">School</label><select id="archive-team"><option value="duke">Duke</option><option value="miami">Miami</option><option value="vt">Virginia Tech</option></select></div><div><label for="archive-sport">Sport</label><select id="archive-sport"><option value="">All sports</option></select></div><div><label for="archive-year">Year</label><select id="archive-year"><option value="">All years</option></select></div></div>
+<div class="archive-status"><p id="archive-note" role="status">Loading recordings…</p><button id="archive-retry">Refresh list</button></div>
 <section id="replay-player" hidden aria-label="Recording player"><h2 id="replay-title"></h2><audio id="replay-audio" controls preload="metadata"></audio>
-<label for="replay-speed">Playback speed</label><select id="replay-speed"><option value="0.75">0.75×</option><option value="1" selected>1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
-<p>Use the audio timeline to find your place. For a TV replay, keep speed at 1×, pause when you hear a distinct play, then resume when you see it.</p>
-<div class="replay-adjust"><button data-replay-seek="-15">Back 15 s</button><button data-replay-seek="-1">Back 1 s</button><button data-replay-seek="-0.25">Back ¼ s</button><button data-replay-seek="0.25">Ahead ¼ s</button><button data-replay-seek="1">Ahead 1 s</button><button data-replay-seek="15">Ahead 15 s</button></div>
-<div class="replay-adjust"><button id="replay-hold">I heard the play · pause</button><button id="replay-resume">Resume at this play</button><button id="replay-stop">Stop recording</button></div><p id="replay-status" role="status"></p></section>
+<div class="replay-rate"><label for="replay-speed">Playback speed</label><select id="replay-speed"><option value="0.75">0.75×</option><option value="1" selected>1× · Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+<p class="replay-help">Use the audio timeline to find your place. For a TV replay, keep speed at 1×, pause when you hear a distinct play, then resume when you see it.</p>
+<div class="replay-adjust replay-seek"><button data-replay-seek="-15">Back 15 s</button><button data-replay-seek="-1">Back 1 s</button><button data-replay-seek="-0.25">Back ¼ s</button><button data-replay-seek="0.25">Ahead ¼ s</button><button data-replay-seek="1">Ahead 1 s</button><button data-replay-seek="15">Ahead 15 s</button></div>
+<div class="replay-adjust replay-actions"><button id="replay-hold">I heard the play · pause</button><button id="replay-resume">Resume at this play</button><button id="replay-stop">Stop recording</button></div><p id="replay-status" role="status"></p></section>
 <ul id="archive-list" class="archive-list"></ul><a id="archive-official" href="https://duke.leanplayer.com/" target="_blank" rel="noopener noreferrer">Visit the official listening site ↗</a>
 </section>
 <aside id="live-sidebar"><details open><summary>Listening & timing</summary><p id="source-note">Live network channel. Game coverage depends on the broadcaster.</p><a id="official" href="https://duke.leanplayer.com/" target="_blank" rel="noopener noreferrer">Open the official player ↗</a><p>The delay above is what this app adds. It is not the time since the play happened at the stadium.</p><p>If the call is still late at 0 seconds, pause your TV until the audio catches up. Reducing delay skips audio forward; adding delay repeats earlier audio.</p><p>After commercials, buffering or a phone interruption, check alignment again. Background and locked-screen playback are not yet verified.</p><button id="demo">Try a repeating test tone</button></details>
