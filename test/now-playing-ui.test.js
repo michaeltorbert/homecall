@@ -15,6 +15,7 @@ import { createTimingFreshness, nextPollDelay } from '../src/timing-freshness.js
 import * as mapping from '../src/sync-mapping.js';
 import { createGameStatus } from '../src/game-status.js';
 import { setupArchive } from '../src/archive.js';
+import * as shell from '../src/ui-shell.js';
 globalThis.__GATEWAY_ORIGIN__ = 'https://gateway.example';
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const strip = file => readFileSync(new URL(file, import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace('export function', 'function');
@@ -73,9 +74,11 @@ function live(t, { mediaSession = true } = {}) {
   if (mediaSession) { Object.defineProperty(w.navigator, 'mediaSession', { value: h.ms, configurable: true }); w.MediaMetadata = FakeMetadata; }
   w.URL.revokeObjectURL = () => {};
   Object.assign(w, { setupSync: options => { h.syncOptions = options; return {}; }, setupArchive: options => { h.archiveOptions = options; }, setupHomestream: catalogFactory,
-    PlaybackMemory, SessionLog, teams, getSources, Player: FakePlayer, demoURL: () => 'blob:demo', createNowPlaying, nowPlayingArtwork, createScoreboard, readJSON, metadataURL, configuredGatewayOrigin, gatewayOptions });
+    PlaybackMemory, SessionLog, teams, getSources, Player: FakePlayer, demoURL: () => 'blob:demo', createNowPlaying, nowPlayingArtwork, createScoreboard, readJSON, metadataURL, configuredGatewayOrigin, gatewayOptions, ...shell });
   w.eval(strip('../src/app.js'));
   h.$ = id => w.document.getElementById(id);
+  // Changing an active session's team or source now asks first; Continue applies the original change.
+  h.proceed = () => h.$('confirm-continue').click();
   h.selectGT = () => { h.$('team').value = 'gt'; h.$('team').onchange(); };
   h.statusReads = () => h.reads.filter(p => p.startsWith('sync/status/')).length;
   h.tick = () => { for (const ticker of h.tickers.filter(x => !x.cancelled && x.ms === 1000)) ticker.fn(); };
@@ -147,6 +150,8 @@ test('Live late results and every terminal path release; a superseded session ca
   h.$('connect').click(); await flush(); h.player.update(PLAYING); await flush();
   h.holdStatus = true; await h.firePoll();
   h.$('team').value = 'duke'; h.$('team').onchange();
+  assert.notEqual(h.ms.metadata, null, 'a pending team prompt changes nothing');
+  h.proceed();
   assert.equal(h.ms.metadata, null, 'changing team releases');
   for (const release of h.held.splice(0)) release();
   await flush();
@@ -174,12 +179,12 @@ test('Live radio, affiliates and the demo publish station or test-tone identity 
   await flush();
   assert.deepEqual(h.meta(), { title: 'Duke Sports Network', artist: 'Homecall · Live radio', album: 'Duke', art: [`${ART} 512x512 image/png`] });
   assert.equal(h.reads.length, 0, 'no game is guessed for radio, so no status is read');
-  h.$('feed').value = 'duke-wsjs'; h.$('feed').onchange();
+  h.$('feed').value = 'duke-wsjs'; h.$('feed').onchange(); h.proceed();
   assert.equal(h.ms.metadata, null, 'changing feed stops and releases');
   h.$('connect').click(); await flush();
   assert.equal(h.ms.metadata.title, 'WSJS · Duke affiliate');
   for (const [key, title] of [['miami', '104.3 WQAM'], ['vt', 'Virginia Tech Sports Network']]) {
-    h.$('team').value = key; h.$('team').onchange(); h.$('connect').click(); await flush(); h.player.update(PLAYING); await flush();
+    h.$('team').value = key; h.$('team').onchange(); h.proceed(); h.$('connect').click(); await flush(); h.player.update(PLAYING); await flush();
     assert.equal(h.ms.metadata.title, title); assert.equal(h.ms.metadata.artist, 'Homecall · Live radio');
   }
   h.$('demo').click(); await flush();
@@ -226,7 +231,7 @@ test('without a Media Session API no scoreboard requests are made and audio is u
 });
 
 // ---------- Sync (src/sync.js + src/homestream-ui.js) ----------
-function syncHarness(t) {
+function syncHarness(t, { prompt = false, liveActive = () => false } = {}) {
   const dom = new JSDOM(html, { url: 'https://example.test/homecall/', runScripts: 'outside-only', pretendToBeVisual: true }), w = dom.window;
   t.after(() => w.close());
   const now = Date.now();
@@ -271,8 +276,11 @@ function syncHarness(t) {
   h.audio = w.document.getElementById('sync-audio');
   Object.defineProperty(h.audio, 'paused', { get: () => h.audioPaused, configurable: true });
   Object.defineProperty(h.audio, 'ended', { get: () => h.audioEnded, configurable: true });
-  h.ui = w.setup({ stopLive: () => { h.liveStops++; }, nowPlaying: h.np, scoreboard: h.board });
+  h.ui = w.setup({ stopLive: () => { h.liveStops++; }, liveActive, confirm: prompt ? shell.createConfirm(w.document) : null, nowPlaying: h.np, scoreboard: h.board });
   h.$ = id => w.document.getElementById('sync-' + id);
+  h.prompt = () => w.document.getElementById('confirm-dialog').hasAttribute('open');
+  h.proceed = () => w.document.getElementById('confirm-continue').click();
+  h.dismiss = () => w.document.getElementById('confirm-cancel').click();
   h.$('timing-source').value = '';
   h.statusReads = () => h.boardReads.filter(p => p.startsWith('sync/status/')).length;
   h.fireBoard = async () => { const timer = h.boardTimers.filter(x => !x.cancelled && !x.fired).at(-1); timer.fired = true; timer.fn(); await flush(); };
@@ -367,6 +375,25 @@ test('a superseded Sync session stops polling even though its audio keeps playin
   assert.equal(h.player.active, true, 'audio itself is untouched');
 });
 
+test('Sync radio takeover, game change and refresh ask first; Cancel keeps audio, identity and the committed game', async t => {
+  let radio = true;
+  const h = syncHarness(t, { prompt: true, liveActive: () => radio });
+  h.ui.activate(); await flush();
+  h.$('play').click();
+  assert.equal(h.prompt(), true); assert.equal(h.liveStops, 0); assert.equal(h.player.starts, 0); assert.equal(h.ms.writes.length, 0, 'no claim before Continue');
+  h.dismiss(); assert.equal(h.player.starts, 0); assert.equal(h.liveStops, 0);
+  h.$('play').click(); h.proceed();
+  assert.equal(h.liveStops, 1); assert.equal(h.player.starts, 1, 'Continue starts the broadcast inside its own click');
+  radio = false; await flush();
+  const title = h.ms.metadata.title;
+  h.$('game').value = 'g1'; h.$('game').dispatchEvent(new h.w.Event('change'));
+  assert.equal(h.prompt(), true); assert.equal(h.$('game').value, 'g2', 'the committed game stays selected while asking');
+  h.dismiss(); assert.equal(h.player.active, true); assert.equal(h.ms.metadata.title, title);
+  h.$('game-refresh').click(); assert.equal(h.prompt(), true); h.dismiss(); assert.equal(h.player.active, true); assert.equal(h.player.starts, 1);
+  h.$('game').value = 'g1'; h.$('game').dispatchEvent(new h.w.Event('change')); h.proceed(); await flush();
+  assert.equal(h.player.active, false); assert.equal(h.$('game').value, 'g1'); assert.equal(h.ms.metadata, null);
+});
+
 // ---------- Archive (src/archive.js) ----------
 test('Archive publishes a score-free recording identity, keeps it through pause, end and error, and releases on stop or replacement', async t => {
   const item = { id: 'one', opponent: 'Tulane', sport: 'Football', start: '2026-09-05T18:00:00Z', kind: 'Game recording', url: 'https://gateway.example/media/archive/duke/one' };
@@ -394,10 +421,12 @@ test('Archive publishes a score-free recording identity, keeps it through pause,
   Object.defineProperty(audio, 'readyState', { value: 1 }); audio.currentTime = 7; audio.dispatchEvent(new dom.window.Event('timeupdate'));
   assert.deepEqual(saved.at(-1), ['replay', 'duke:one', 7], 'bookmarks are unchanged');
   $('archive-list').querySelector('button').click();
+  assert.equal(ms.writes.length, writes, 'a pending replacement prompt changes nothing');
+  $('confirm-continue').click();
   assert.deepEqual(ms.writes.slice(writes).map(x => x?.title ?? null), [null, 'Duke vs Tulane'], 'replacement releases before the new claim');
   assert.ok(requests.every(url => url.endsWith('/api/catalog/archive')), 'Archive never reads game status or scores');
   assert.ok(!/\d+, |ESPN|Q\d/.test(ms.metadata.title + ms.metadata.artist));
-  $('archive-team').value = 'miami'; $('archive-team').onchange();
+  $('archive-team').value = 'miami'; $('archive-team').onchange(); $('confirm-continue').click();
   assert.equal(ms.metadata, null);
   noControls(ms);
 });

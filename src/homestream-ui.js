@@ -9,10 +9,12 @@ const messages = {
   ready: 'Live playlist confirmed. Press Play, then match the audio to your TV.'
 };
 // onGames/onCatalogInvalidated are optional label hooks; they never affect readiness or playback.
-export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidated, read = readJSON, probe = checkPlaylist, prefix = '', school = () => 'Georgia Tech' }) {
+// guard(kind, proceed, revert) lets the owner confirm a user's game change or refresh before it
+// stops playback; revert puts back the committed game while the prompt is pending.
+export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidated, guard = (_kind, proceed) => proceed(), read = readJSON, probe = checkPlaylist, prefix = '', school = () => 'Georgia Tech' }) {
   const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
   const $ = id => document.getElementById(prefix + id);
-  let controller, games = [], ready = null, enabled = false;
+  let controller, games = [], ready = null, enabled = false, committed = '';
   const baseLabels = new WeakMap();
   const cancel = () => { controller?.abort(); controller = null; ready = null; };
   const invalidate = () => { try { onCatalogInvalidated?.(); } catch { /* Optional labels cannot block the catalog. */ } };
@@ -55,7 +57,7 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
         $('game').append(option);
       }
       if (!current) { $('game-note').textContent = `No ${school()} football games are listed. Refresh later.`; onReady(); return; }
-      $('game').value = current.id;
+      $('game').value = committed = current.id;
       try { onGames?.(games.map(({id, opponent, start}) => ({id, opponent, start})), {teamId: team.id}); } catch { /* Labels are optional. */ }
       await check(current, signal);
     } catch {
@@ -64,12 +66,22 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
       if (!signal.aborted) { $('game').disabled = !games.length; $('game-refresh').disabled = false; }
     }
   }
-  $('game').onchange = async () => {
+  async function change(id) {
+    committed = id;
     const signal = begin();
-    try { await check(games.find(g => g.id === $('game').value), signal); }
+    try { await check(games.find(g => g.id === id), signal); }
     catch { /* An obsolete selection was canceled. */ }
+  }
+  $('game').onchange = () => {
+    const next = $('game').value;
+    return guard('game', () => {
+      // A refresh while the prompt was open may have withdrawn the requested game.
+      if (![...$('game').options].some(option => option.value === next)) return;
+      $('game').value = next;
+      return change(next);
+    }, () => { $('game').value = committed; });
   };
-  $('game-refresh').onclick = refresh;
+  $('game-refresh').onclick = () => guard('refresh', refresh);
   return {
     get ready() { return ready; },
     refresh,
