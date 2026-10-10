@@ -14,7 +14,18 @@ const catalog={schemaVersion:1,version:'test-v1',updatedAt:'2026-09-01T00:00:00Z
   archiveConfig:{dukePlayer:'https://archive-player.example/',dukeFeedPath:'/previous.xml',vtFeed:'https://archive-feed.example/vt',replayRules:{duke:[{origin:'https://audio.example',pathPrefix:'/replay/',filenamePattern:'^\\d+\\.mp3$'}],vt:[{origin:'https://audio.example',pathPrefix:'/vt/',filenamePattern:'^\\d+\\.mp3$'}]}},
   discovery:{homestreamBase:'https://discovery.example',mediaOrigins:['https://audio.example']}};
 const uuid = '410422f0-663f-4e3d-82e2-787d954ae29d';
-let calls = 0;
+let calls = 0, scheduleCalls = 0;
+// SYNTHETIC Duke player page and signed live schedule (issue #32). The archive refresh reads the same page.
+const PLAYER_PAGE = '<script>var event_xml_urls = {live: "https://archive-player.example/live.xml?expires=1&signature=SECRET-SIGNATURE", previous: "https://archive-player.example/previous.xml"};</script>';
+// The earliest row is a 7 p.m. EDT show; the later 4 a.m. EDT row is unconfirmed under the local policy and must not block it.
+const LIVE_XML = '<?xml version="1.0"?>\n<main><sports><sport><id>1</id><name>Football</name><is_show>0</is_show></sport><sport><id>898</id><name>Football Radio Show</name><is_show>1</is_show></sport></sports><events><current_ev/><upcoming_ev>' +
+  '<event><id>s1</id><start_timestamp>1791932400</start_timestamp><end>2026-10-14 00:00:00</end><sport_id>898</sport_id><opponent/><url>https://audio.example/live</url></event>' +
+  '<event><id>g1</id><start_timestamp>1793433600</start_timestamp><end>2026-10-31 09:00:00</end><sport_id>1</sport_id><opponent>Visitor</opponent><url>https://audio.example/live</url></event></upcoming_ev></events></main>';
+const scheduleProbe = `import { uncertainStart } from './broadcast-schedule.mjs';
+export default { async fetch() {
+  return Response.json({ zone: new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York' }).resolvedOptions().timeZone,
+    edt4: uncertainStart(1793433600000), est4: uncertainStart(1794042000000), edt659: uncertainStart(1793444340000), edt7: uncertainStart(1793444400000), est659: uncertainStart(1794052740000), est7: uncertainStart(1794052800000) });
+}};`;
 let streamClosed = false;
 const streamingUpstream = (req,res) => {
   res.setHeader('Content-Type','audio/mpeg');
@@ -26,9 +37,10 @@ const upstream = async request => {
   const url = new URL(request.url);
   assert.equal(request.headers.get('Authorization'), null);
   assert.equal(request.headers.get('Cookie'), null);
+  if (url.hostname === 'archive-player.example' && url.pathname === '/live.xml') { scheduleCalls++; return new FixtureResponse(LIVE_XML, { headers: { Date: new Date().toUTCString(), Age: '2' } }); }
   if (url.hostname === 'archive-player.example') return new FixtureResponse(url.pathname === '/previous.xml'
     ? '<main><events><previous_ev><event><id>d1</id><start_timestamp>1788645600</start_timestamp><end>2026-09-06 21:00:00</end><sport_id>1</sport_id><opponent>Visitor</opponent><archive_url>https://audio.example/replay/1.mp3</archive_url></event></previous_ev></events></main>'
-    : 'previous: "https://archive-player.example/previous.xml"');
+    : PLAYER_PAGE);
   if (url.hostname === 'archive-feed.example') return new FixtureResponse('unavailable', { status: 503 });
   if (url.hostname === 'audio.example') return new FixtureResponse(new Uint8Array([73,68,51,0,1,2]), {headers:{'Content-Type':'audio/mpeg','Location':'https://audio.example/private','Set-Cookie':'private=1'}});
   if (url.searchParams.get('event') === '2') return FixtureResponse.redirect('https://unexpected.invalid/redirect');
@@ -70,6 +82,9 @@ const mf = new Miniflare({
       manifest: { mainModule: 'index.js', modules: { 'index.js': { type: 'esm', contents: bundle } } },
       env: { MEDIA_STREAM_MODE: {type:'text',value:'native'}, ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS }, STREAM_CATALOG: {type:'kv',id:'fixture-catalog'} }
     }, dev: { outboundService: {type:'node-handler',handler:streamingUpstream} } },
+    { config: { name: 'schedule-probe', type: 'worker', compatibilityDate: config.compatibility_date,
+      manifest: { mainModule: 'probe.mjs', modules: Object.fromEntries([['probe.mjs', scheduleProbe], ...['broadcast-schedule.mjs', 'duke-source.mjs', 'backend-json.mjs', 'archive-source.mjs'].map(name => [name, readFileSync(`lib/${name}`, 'utf8')])].map(([name, contents]) => [name, { type: 'esm', contents }])) }
+    } },
     { config: { name: 'reader-probe', type: 'worker', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'probe.mjs', modules: {
         'probe.mjs': { type: 'esm', contents: readerProbe },
@@ -157,6 +172,26 @@ try {
   assert.equal(calls, prior + 1, 'Redirect must be rejected without a second fetch');
   assert.equal((await request('/api/sync/plays/3')).status, 502);
   assert.equal((await request('/api/sync/plays/4')).status, 502);
+  // Duke next-broadcast route in workerd: two metadata requests per miss, sanitized aged body, cache hit, named time zone.
+  const scheduleFirst = await request('/api/broadcast/schedule/duke', { headers: { Origin: origin, Authorization: 'do-not-forward', Cookie: 'do-not-forward' } });
+  assert.equal(scheduleFirst.status, 200);
+  assert.equal(scheduleFirst.headers.get('Access-Control-Allow-Origin'), origin);
+  assert.equal(scheduleFirst.headers.get('Cache-Control'), 'no-store');
+  const scheduleText = await scheduleFirst.text(), schedule = JSON.parse(scheduleText);
+  assert.deepEqual(Object.keys(schedule), ['schemaVersion', 'school', 'state', 'event', 'checkedAt', 'ageMs']);
+  assert.deepEqual([schedule.schemaVersion, schedule.school, schedule.state, schedule.event], [1, 'duke', 'upcoming', { id: 's1', label: 'Football Radio Show', kind: 'show', broadcastStart: 1791932400000 }]);
+  assert.ok(Number.isSafeInteger(schedule.checkedAt) && Number.isSafeInteger(schedule.ageMs) && schedule.ageMs >= 2000);
+  for (const leaked of ['archive-player.example', 'SECRET', 'signature', 'expires', 'audio.example', 'live.xml']) assert.ok(!scheduleText.includes(leaked), leaked);
+  assert.equal(scheduleCalls, 1);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const scheduleHit = await (await request('/api/broadcast/schedule/duke')).json();
+  assert.equal(scheduleHit.checkedAt, schedule.checkedAt);
+  assert.ok(scheduleHit.ageMs > schedule.ageMs);
+  assert.equal(scheduleCalls, 1, 'Schedule cache hit must avoid another provider request');
+  for (const target of ['/api/broadcast/schedule/vt', '/api/broadcast/schedule/duke?x=1', '/api/broadcast/schedule/%64uke']) assert.equal((await request(target)).status, 404, target);
+  assert.equal(scheduleCalls, 1);
+  const zones = await (await (await mf.getWorker('schedule-probe')).fetch('https://probe.invalid')).json();
+  assert.deepEqual(zones, { zone: 'America/New_York', edt4: true, est4: true, edt659: true, edt7: false, est659: true, est7: false });
   const probe = await mf.getWorker('reader-probe');
   const runtime = await (await probe.fetch('https://probe.invalid')).json();
   assert.deepEqual(runtime, {timeout:true,cancelled:true,cache:'no-store',credentials:'omit',redirect:'manual',combinedSignal:true});
@@ -175,6 +210,6 @@ try {
   assert.deepEqual([archive.schools.vt.status, archive.schools.vt.checkedAt, new URL(archive.schools.vt.items[0].url).pathname], ['stale', archivedAt, '/media/archive/vt/v0']);
   for (const leaked of ['audio.example', 'archive-player.example', 'archive-feed.example', 'school.example']) assert.ok(!archiveText.includes(leaked), leaked);
   console.log(JSON.stringify({ result: 'PASS', workerd: JSON.parse(readFileSync('node_modules/workerd/package.json')).version,
-    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'six HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'synthetic live scoreboard in the unchanged schema 1 status envelope','per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility', 'scheduled refresh: per-school last-known-good retention with original time and concealed projection'],
+    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'seven HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'synthetic live scoreboard in the unchanged schema 1 status envelope','per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility', 'scheduled refresh: per-school last-known-good retention with original time and concealed projection', 'Duke broadcast schedule: signed same-origin live entry, sanitized aged body, cache hit, America/New_York Intl'],
     limitation: 'Local workerd with fixture upstreams; no deployed cache, platform CPU, browser HLS or account entitlement proof.' }, null, 2));
 } finally { await mf.dispose(); }
