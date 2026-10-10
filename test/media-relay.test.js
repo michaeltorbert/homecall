@@ -211,6 +211,44 @@ test('plain same-directory segments share one directory capability; everything e
   assert.ok(!only.includes('/')); assert.equal((await openMediaTarget(only, secret, { now: 1000 })).target.url, 'https://audio.example/live/abc/seg_1.ts');
   assert.equal((await relay('#EXTM3U\n#EXTINF:1,\nseg_1.ts\n', { allowedPaths: ['/live/abc/'] })).status, 200);
 });
+test('the seal budget counts cryptographic work, not playlist references', async () => {
+  const live = { ...target, url: 'https://audio.example/live/abc/index.m3u8', kind: 'hls' };
+  const relay = (text, extra = {}) => relayMedia(request(), live, { ...opts, ...extra, fetcher: async () => new Response(text) });
+  const playlist = (count, name) => ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:1', '#EXT-X-MEDIA-SEQUENCE:1000',
+    ...Array.from({ length: count }, (_, i) => [`#EXT-X-PROGRAM-DATE-TIME:${new Date(Date.UTC(2026, 9, 10, 12) + i * 1000).toISOString()}`, '#EXTINF:1.000,', name(i)]).flat()].join('\n');
+  const uris = text => text.split('\n').filter(l => l && !l.startsWith('#'));
+  // 650 one-second timestamped segments: names stay unchanged through the directory capability.
+  const segments = playlist(650, i => `seg_${1000 + i}.ts`);
+  const viaDirectory = await relay(segments, { directory: 'https://audio.example/live/abc/' });
+  assert.equal(viaDirectory.status, 200);
+  const named = await viaDirectory.text();
+  assert.deepEqual(uris(named), Array.from({ length: 650 }, (_, i) => `seg_${1000 + i}.ts`));
+  assert.equal(named.split('\n').filter(l => l.startsWith('#EXT-X-PROGRAM-DATE-TIME:')).length, 650);
+  // Without the directory form, all 650 share one directory capability.
+  const direct = await relay(segments);
+  assert.equal(direct.status, 200);
+  const prefixed = uris(await direct.text());
+  assert.equal(prefixed.length, 650);
+  assert.equal(new Set(prefixed.map(l => l.slice(0, l.lastIndexOf('/')))).size, 1);
+  assert.ok(prefixed.every((l, i) => l.endsWith(`/seg_${1000 + i}.ts`)));
+  // Query references fall outside the directory and each needs an exact seal.
+  const queried = count => playlist(count, i => `q_${i}.ts?sig=${i}`);
+  for (const count of [350, 512]) {
+    const response = await relay(queried(count));
+    assert.equal(response.status, 200);
+    const lines = uris(await response.text());
+    assert.equal(lines.length, count); assert.equal(new Set(lines).size, count);
+    assert.ok(lines.every(l => /^https:\/\/gateway\.example\/media\/resource\/[\w-]+$/.test(l)));
+  }
+  assert.equal((await relay(queried(513))).status, 502);
+  // Repeated references reuse the cached seal and do not spend the budget.
+  assert.equal((await relay(playlist(650, () => 'repeat.ts?sig=1'))).status, 200);
+  // Per-reference guards still reject malicious URIs, including past 512 directory names.
+  for (const bad of ['seg 1.ts', 'seg\\1.ts', 'seg{$x}.ts', '#EXT-X-MAP:URI="a b.mp4"', '#EXT-X-KEY:METHOD=AES-128,URI="k{$v}"']) {
+    const text = `${segments}\n${bad.startsWith('#') ? `${bad}\n#EXTINF:1,\nseg_x.ts` : `#EXTINF:1,\n${bad}`}`;
+    assert.equal((await relay(text)).status, 502, bad);
+  }
+});
 test('directory capabilities reject non-directory scopes and malformed forms at seal time', async () => {
   const base = { sourceId: 'live-x', version: '1' };
   await assert.rejects(sealMediaTarget({ ...base, target: { url: 'https://a.example/d/', kind: 'hls', allowedOrigins: ['https://a.example'], scope: 'directory' } }, secret), /Invalid media payload/);

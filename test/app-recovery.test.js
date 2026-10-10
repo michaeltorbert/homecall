@@ -18,7 +18,9 @@ function harness(t, catalogFactory, extra={}) {
  t.after(()=>w.close());let player, catalog;
  class FakePlayer {
   constructor(update,event){this.update=update;this.event=event;this.sequence=0;this.epoch=0;player=this;this.starts=[];}
-  start(url,delay){this.starts.push({url,delay});this.context={state:'running'};this.audio={paused:false};if(this.failNext){this.failNext=false;return Promise.reject(Error('source-error'))}return Promise.resolve();}
+  get sourceConnected(){return !!this.audio;}
+  get sourcePaused(){return !!this.audio?.paused;}
+  start(url,delay,options={}){this.starts.push({url,delay,mp3:!!options.mp3,hls:!!options.hls});this.context={state:'running'};this.audio={paused:false};if(this.failNext){this.failNext=false;return Promise.reject(Error('source-error'))}return Promise.resolve();}
   stop(){this.context=null;this.audio=null;}
   command(type,value){this.lastCommand={type,value};return Promise.resolve({result:'applied',before:{delay:35},after:{delay:35},contextSeconds:1});}
   resumeContext(){return Promise.resolve();}
@@ -45,6 +47,19 @@ test('source changes and demo cannot inherit or overwrite another live source de
  h.player.update({delay:5,available:10,paused:false,holding:false,ingesting:true,restoring:null});
  assert.equal(JSON.parse(h.w.localStorage.getItem('homecall.position.live.duke-leanstream')).value,35);
  h.$('team').value='miami';h.$('team').onchange();h.proceed();h.$('connect').click();await settle();assert.equal(h.player.starts[1].delay,0);
+});
+test('only the verified Duke primary MP3 is decoded; backups, other stations and the demo keep their media element',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();
+ assert.deepEqual({mp3:h.player.starts[0].mp3,hls:h.player.starts[0].hls},{mp3:true,hls:false});
+ h.$('stop').click();h.$('feed').value='duke-wtib';h.$('feed').onchange();h.$('connect').click();await settle();assert.equal(h.player.starts[1].mp3,false);
+ h.$('stop').click();h.$('team').value='miami';h.$('team').onchange();h.$('connect').click();await settle();assert.equal(h.player.starts[2].mp3,false);
+ h.$('stop').click();h.$('demo').click();await settle();assert.equal(h.player.starts[3].mp3,false);
+});
+test('an unavailable MP3 decoder is reported plainly instead of falling back to native playback',async t=>{
+ const h=harness(t);const start=h.player.start.bind(h.player);
+ h.player.start=(...args)=>{start(...args);return Promise.reject(Error('mp3-unsupported'));};
+ h.$('connect').click();await settle();
+ assert.equal(h.player.starts.length,1);assert.match(h.$('notice').textContent,/radio audio decoder/);assert.equal(h.$('connect').hidden,false);
 });
 test('pause offers saved-delay default and retained-position alternative',async t=>{
  const h=harness(t);h.$('connect').click();await settle();

@@ -4,13 +4,18 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 function deferred() { let resolve,reject; const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject}; }
 function harness(timing = {}) {
-  const contexts=[],audios=[],nodes=[],events=[],states=[],transports=[];
+  const contexts=[],audios=[],nodes=[],events=[],states=[],transports=[],mp3s=[];
   class Context {
     constructor(){this.state='running';this.module=deferred();this.audioWorklet={addModule:()=>this.module.promise};contexts.push(this);}
     resume(){this.state='running';return Promise.resolve();}
     close(){this.closed=true;return Promise.resolve();}
     createMediaElementSource(){return {connect(){}};}
-    createGain(){return {gain:{value:0},connect(){}};}
+    createGain(){const g={gain:{value:0},connect(to){g.to=to;},disconnect(){g.disconnected=true;}};return g;}
+  }
+  class Mp3Transport {
+    constructor(context,output,url,onEvent){Object.assign(this,{context,output,url,onEvent,position:0});this.gate=deferred();this.ready=this.gate.promise;this.ready.catch(()=>{});mp3s.push(this);}
+    start(){this.started=true;} play(){this.playing=true;}
+    stop(){this.stopped=true;this.gate.reject(Error('aborted'));}
   }
   class Audio {
     constructor(){this.played=deferred();this.readyState=4;audios.push(this);}
@@ -32,11 +37,11 @@ function harness(timing = {}) {
     attachMedia(audio){this.audio=audio;}
     destroy(){this.destroyed=true;}
   }
-  const sandbox=vm.createContext({Hls,window:{AudioContext:Context,AudioWorkletNode:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout:timing.setTimeout || setTimeout,clearTimeout:timing.clearTimeout || clearTimeout});
+  const sandbox=vm.createContext({Hls,Mp3Transport,navigator:timing.navigator,window:{AudioContext:Context,AudioWorkletNode:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout:timing.setTimeout || setTimeout,clearTimeout:timing.clearTimeout || clearTimeout});
   const source=fs.readFileSync(new URL('../src/player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class Player','class Player');
   vm.runInContext(source+'\nglobalThis.Player = Player;',sandbox);
   const player=new sandbox.Player(s=>states.push(s),e=>events.push(e));
-  return{player,contexts,audios,nodes,events,states,transports};
+  return{player,contexts,audios,nodes,events,states,transports,mp3s};
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function connect(h){const started=h.player.start('https://fixture/stream');const a=h.audios.at(-1);a.onplaying();a.played.resolve();h.contexts.at(-1).module.resolve();await tick();h.nodes.at(-1).ack();await started;}
@@ -204,6 +209,53 @@ test('a sustained post-connect stall has one watchdog and short buffering cancel
  audio.onwaiting();assert.equal(h.timers.filter(t=>!t.cleared&&t.ms===20000).length,1);
  audio.onplaying();assert.equal(timer.cleared,true);assert.equal(h.nextRetry(),undefined);
  audio.readyState=2;audio.onstalled();const sustained=h.timers.find(t=>!t.cleared&&t.ms===20000);sustained.fn();assert.equal(h.nextRetry().ms,1000);h.player.stop();
+});
+test('radio MP3 never creates a media element and schedules decoded audio only after restore and ingest are acknowledged',async()=>{
+ const h=harness();const started=h.player.start('https://fixture/radio',35,{mp3:true});const t=h.mp3s[0];
+ assert.equal(h.audios.length,0);assert.equal(t.started,true);assert.equal(t.url,'https://fixture/radio');
+ t.gate.resolve();h.contexts[0].module.resolve();await tick();
+ const n=h.nodes[0];assert.equal(n.messages[0].type,'restore');assert.equal(t.output.to,undefined);assert.equal(t.playing,undefined);
+ n.ack(0);await tick();assert.equal(t.output.to,n);assert.equal(n.messages[1].type,'ingest');assert.equal(n.messages[1].value,true);assert.equal(t.playing,undefined);
+ n.ack(1);await started;assert.equal(t.playing,true);assert.equal(h.events.at(-1),'source-playing');
+ assert.equal(h.player.sourceConnected,true);assert.equal(h.player.sourcePaused,false);
+ h.player.stop();assert.equal(t.stopped,true);assert.equal(t.output.disconnected,true);assert.equal(h.player.sourceConnected,false);
+});
+test('MP3 radio selects the playback audio session before its context exists; unsupported sessions do not block start',async()=>{
+ const sets=[];let h;
+ const run=async(...args)=>{const started=h.player.start(...args).catch(()=>{});h.player.stop();h.contexts.at(-1).module.resolve();await started;};
+ h=harness({navigator:{audioSession:{set type(value){sets.push([value,h.contexts.length]);}}}});
+ await run('https://fixture/radio',0,{mp3:true});assert.deepEqual(sets,[['playback',0]]);
+ h=harness({navigator:{audioSession:{set type(value){throw Error('unsupported');}}}});
+ await run('https://fixture/radio',0,{mp3:true});assert.equal(h.mp3s.length,1);
+ h=harness({navigator:{audioSession:{set type(value){sets.push([value,'native']);}}}});
+ await run('https://fixture/stream');assert.equal(sets.length,1,'native media keeps its own session');
+});
+test('stopping during MP3 startup aborts the transport and builds no engine',async()=>{
+ const h=harness();const started=h.player.start('https://fixture/radio',0,{mp3:true});h.player.stop();
+ assert.equal(h.mp3s[0].stopped,true);h.contexts[0].module.resolve();await started;assert.equal(h.nodes.length,0);assert.equal(h.contexts[0].closed,true);
+});
+test('MP3 starvation interrupts ingestion and resumes as continuous when no audio was skipped',async()=>{
+ const h=harness();const started=h.player.start('https://fixture/radio',0,{mp3:true});const t=h.mp3s[0];
+ t.gate.resolve();h.contexts[0].module.resolve();await tick();const n=h.nodes[0];n.ack(0);await started;
+ t.position=12;t.onEvent('waiting');assert.equal(n.messages[1].type,'interrupt');assert.equal(h.events.at(-1),'source-waiting');n.ack(1);
+ t.onEvent('playing');assert.deepEqual(JSON.parse(JSON.stringify(n.messages[2].value)),{playing:true,continuous:true});n.ack(2);
+ t.onEvent('waiting');n.ack(3);t.position=20;t.onEvent('playing');assert.equal(n.messages[4].value,true);n.ack(4);h.player.stop();
+});
+test('MP3 decoder failure rejects startup with its reason and creates no native fallback',async()=>{
+ const h=harness();const started=h.player.start('https://fixture/radio',0,{mp3:true});const rejection=assert.rejects(started,/mp3-unsupported/);
+ const error=Error('mp3-unsupported');h.mp3s[0].gate.reject(error);h.mp3s[0].onEvent('error',error);h.contexts[0].module.resolve();await rejection;
+ assert.equal(h.audios.length,0);assert.equal(h.contexts[0].closed,true);assert.equal(h.mp3s[0].stopped,true);
+});
+test('MP3 EOF reconnects through a fresh decoder transport with the saved delay, never a media element',async()=>{
+ const h=recoveryHarness();const started=h.player.start('https://fixture/radio',0,{mp3:true});
+ h.mp3s[0].gate.resolve();h.contexts[0].module.resolve();await tick();h.nodes[0].ack(0);await started;
+ h.player.state={delay:20,resumeDelay:20,paused:false};h.mp3s[0].onEvent('ended');
+ assert.equal(h.mp3s[0].stopped,true);assert.equal(h.events.at(-1),'source-reconnecting');
+ const timer=h.nextRetry();timer.fired=true;const retry=timer.fn();
+ assert.equal(h.mp3s.length,2);assert.equal(h.mp3s[1].url,'https://fixture/radio');assert.equal(h.audios.length,0);
+ h.mp3s[1].gate.resolve();h.contexts[1].module.resolve();await tick();
+ const n=h.nodes[1];assert.equal(n.messages[0].type,'restore');assert.equal(n.messages[0].value,20);n.ack(0);await tick();n.ack(1);await retry;
+ assert.equal(h.mp3s[1].playing,true);assert.equal(h.events.at(-1),'source-reconnected');h.player.stop();
 });
 test('stall watchdog cannot restart a deliberate hold, native pause, or stopped source',async()=>{
  for(const action of ['hold','pause','stop']){

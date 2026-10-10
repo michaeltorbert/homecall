@@ -49,6 +49,8 @@ function live(t, { mediaSession = true } = {}) {
       scoreboard: { phase: 'in-progress', period: 2, clock: '7:29', scores: { 150: 14, 59: 17 } } }]) };
   class FakePlayer {
     constructor(update, event) { this.update = update; this.event = event; this.sequence = 0; this.epoch = 0; this.starts = []; h.player = this; }
+    get sourceConnected() { return !!this.audio; }
+    get sourcePaused() { return !!this.audio?.paused; }
     start(url, delay) { this.starts.push({ url, delay }); this.context = { state: 'running' }; this.audio = { paused: false }; if (this.failNext) { this.failNext = false; return Promise.reject(Error('source-error')); } return Promise.resolve(); }
     stop() { this.context = null; this.audio = null; }
     command() { return Promise.resolve({ result: 'applied', before: { delay: 0 }, after: { delay: 0 }, contextSeconds: 1 }); }

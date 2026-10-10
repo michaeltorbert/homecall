@@ -1,21 +1,28 @@
 import Hls from 'hls.js';
 import workletURL from './audio-worklet.js?worker&url';
+import { Mp3Transport } from './mp3-transport.js';
 export class Player {
   constructor(onState, onEvent) {
     this.onState = onState; this.onEvent = onEvent;
     this.epoch = 0; this.sequence = 0; this.pending = new Map(); this.state = null;
   }
-  async start(url, delay = 0, { hls = false, recovery = null } = {}) {
-    recovery ||= { url, hls, delay, attempts: 0 };
+  // Transport-neutral source predicates; the MP3 route has no media element to inspect.
+  get sourceConnected() { return !!(this.audio || this.mp3); }
+  get sourcePaused() { return !!this.audio?.paused; }
+  async start(url, delay = 0, { hls = false, mp3 = false, recovery = null } = {}) {
+    recovery ||= { url, hls, mp3, delay, attempts: 0 };
     this.stop(recovery);
     const epoch = this.epoch;
     const Context = window.AudioContext || window.webkitAudioContext;
     if (!Context || !window.AudioWorkletNode || !window.isSecureContext) throw new Error('unsupported');
+    // Without a media element, iPhone treats Web Audio as ambient and the silent switch mutes it.
+    if (mp3) try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* Unsupported. */ }
     const context = this.context = new Context();
-    const audio = this.audio = new Audio();
-    audio.crossOrigin = 'anonymous'; audio.preload = 'none'; audio.playsInline = true;
+    const audio = this.audio = mp3 ? null : new Audio();
+    if (audio) { audio.crossOrigin = 'anonymous'; audio.preload = 'none'; audio.playsInline = true; }
     const valid = () => epoch === this.epoch;
-    let gapPosition = null, connected = false;
+    let gapPosition = null, connected = false, transport = null;
+    const position = () => transport ? transport.position : audio.currentTime;
     const clearStall = () => { if (this.stallTimer) clearTimeout(this.stallTimer); this.stallTimer = null; };
     const armStall = () => {
       if (!valid() || !connected || this.stallTimer || this.state?.holding || (this.state?.paused && this.state?.restoring == null)) return;
@@ -25,9 +32,9 @@ export class Player {
         this.recover(recovery);
       }, 20000);
     };
-    const markGap = () => { if (gapPosition === null) gapPosition = Number.isFinite(audio.currentTime) ? audio.currentTime : NaN; };
+    const markGap = () => { if (gapPosition === null) gapPosition = Number.isFinite(position()) ? position() : NaN; };
     const ingestion = () => {
-      const continuous = Number.isFinite(gapPosition) && Number.isFinite(audio.currentTime) && Math.abs(audio.currentTime - gapPosition) < 0.1;
+      const continuous = Number.isFinite(gapPosition) && Number.isFinite(position()) && Math.abs(position() - gapPosition) < 0.1;
       gapPosition = null;
       return continuous ? { playing: true, continuous: true } : true;
     };
@@ -46,7 +53,7 @@ export class Player {
     // Resume and media.play originate in this click; do not wait for module download first.
     const resumed = context.resume();
 
-    audio.onplaying = () => {
+    const playing = () => {
       if (!valid()) return;
       clearStall(); this.mediaPlaying = true;
       if (this.node && context.state === 'running') this.command('ingest', ingestion()).catch(() => {});
@@ -61,27 +68,42 @@ export class Player {
       if (['source-waiting', 'source-stalled'].includes(kind)) armStall();
       if (connected && ['source-ended', 'source-error'].includes(kind)) this.recover(recovery);
     };
-    audio.onwaiting = () => interrupted('source-waiting');
-    audio.onstalled = () => { if (audio.readyState < 3) interrupted('source-stalled'); };
-    audio.onpause = () => interrupted('source-paused');
-    audio.onended = () => interrupted('source-ended');
-    audio.onerror = () => interrupted('source-error');
-    // Connect before play so the element never bypasses the delay engine.
-    const source = this.source = context.createMediaElementSource(audio);
-    let failHls;
-    const hlsFailure = new Promise((_, reject) => { failHls = reject; });
-    if (hls && Hls.isSupported()) {
-      const transport = this.hls = new Hls({ maxBufferLength: 12, backBufferLength: 0 });
-      transport.on(Hls.Events.ERROR, (_, data) => {
-        if (valid() && data.fatal) { failHls(new Error('hls-error')); interrupted('source-error'); }
+    let failSource;
+    const sourceFailure = new Promise((_, reject) => { failSource = reject; }); sourceFailure.catch(() => {});
+    let source, played;
+    if (mp3) {
+      // Decoded radio PCM enters through this stereo input; no media element exists to bypass the engine.
+      source = this.source = context.createGain();
+      source.channelCount = 2; source.channelCountMode = 'explicit'; source.channelInterpretation = 'speakers';
+      transport = this.mp3 = new Mp3Transport(context, source, url, (kind, error) => {
+        if (!valid()) return;
+        if (kind === 'playing') playing();
+        else if (kind === 'error') { failSource(error); interrupted('source-error'); }
+        else interrupted(kind === 'ended' ? 'source-ended' : 'source-waiting');
       });
-      transport.loadSource(url); transport.attachMedia(audio);
-    } else if (!hls || audio.canPlayType('application/vnd.apple.mpegurl')) audio.src = url;
-    else { this.stop(); throw new Error('hls-unsupported'); }
-    const played = audio.play();
+      transport.start(); played = transport.ready;
+    } else {
+      audio.onplaying = playing;
+      audio.onwaiting = () => interrupted('source-waiting');
+      audio.onstalled = () => { if (audio.readyState < 3) interrupted('source-stalled'); };
+      audio.onpause = () => interrupted('source-paused');
+      audio.onended = () => interrupted('source-ended');
+      audio.onerror = () => interrupted('source-error');
+      // Connect before play so the element never bypasses the delay engine.
+      source = this.source = context.createMediaElementSource(audio);
+      if (hls && Hls.isSupported()) {
+        const hlsTransport = this.hls = new Hls({ maxBufferLength: 12, backBufferLength: 0 });
+        hlsTransport.on(Hls.Events.ERROR, (_, data) => {
+          if (valid() && data.fatal) { failSource(new Error('hls-error')); interrupted('source-error'); }
+        });
+        hlsTransport.loadSource(url); hlsTransport.attachMedia(audio);
+      } else if (!hls || audio.canPlayType('application/vnd.apple.mpegurl')) audio.src = url;
+      else { this.stop(); throw new Error('hls-unsupported'); }
+      played = audio.play();
+    }
     let startupTimer;
     const deadline = new Promise((_, reject) => { startupTimer = setTimeout(() => reject(new Error('source-timeout')), 20000); });
-    const settled = Promise.race([Promise.all([resumed, played]), deadline, hlsFailure]); settled.catch(() => {});
+    const settled = Promise.race([Promise.all([resumed, played]), deadline, sourceFailure]); settled.catch(() => {});
     try {
       await Promise.race([context.audioWorklet.addModule(workletURL), deadline]);
       if (!valid()) return;
@@ -106,11 +128,17 @@ export class Player {
       await settled;
       if (!valid()) return;
       // Run the output graph so the restore can be acknowledged before admitting input.
-      if (delay > 0) await Promise.race([this.command('restore', delay), deadline]);
+      if (delay > 0) await Promise.race([this.command('restore', delay), deadline, sourceFailure]);
       if (!valid()) return;
       source.connect(node);
-      if (valid()) await Promise.race([this.command('ingest', !!this.mediaPlaying), deadline]);
-      if (valid()) { connected = true; if (!this.mediaPlaying) armStall(); }
+      // Decoded audio is buffered and waiting; ingestion is acknowledged before its first sample is scheduled.
+      if (transport) this.mediaPlaying = true;
+      if (valid()) await Promise.race([this.command('ingest', !!this.mediaPlaying), deadline, sourceFailure]);
+      if (valid()) {
+        connected = true;
+        if (transport) { transport.play(); this.onEvent('source-playing'); }
+        if (!this.mediaPlaying) armStall();
+      }
     } catch (error) { if (valid()) this.stop(recovery); throw error; }
     finally { clearTimeout(startupTimer); }
   }
@@ -137,7 +165,7 @@ export class Player {
       this.retryTimer = null;
       if (session !== this.recovery) return;
       try {
-        await this.start(session.url, session.delay, { hls: session.hls, recovery: session });
+        await this.start(session.url, session.delay, { hls: session.hls, mp3: session.mp3, recovery: session });
         if (session === this.recovery) this.onEvent('source-reconnected');
       } catch (error) {
         if (session !== this.recovery) return;
@@ -188,6 +216,7 @@ export class Player {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('disconnected')); }
     this.pending.clear();
     if (this.hls) { this.hls.destroy(); this.hls = null; }
+    if (this.mp3) { this.mp3.stop(); this.source.disconnect(); this.mp3 = null; }
     if (this.audio) {
       this.audio.onplaying = this.audio.onwaiting = this.audio.onstalled = this.audio.onended = this.audio.onpause = this.audio.onerror = null;
       this.audio.pause(); this.audio.removeAttribute('src'); this.audio.load();

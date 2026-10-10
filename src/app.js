@@ -36,7 +36,7 @@ const liveBoard = scoreboard();
 let liveOwner = null, liveCatalog = null;
 // Volatile game data follows actual PCM output, not input ingestion or the selected view, and
 // stops as soon as another session owns Now Playing.
-const livePlaying = () => !!liveOwner?.current && active && !connecting && !!state && player.context?.state === 'running' && !!player.audio && !player.audio.paused &&
+const livePlaying = () => !!liveOwner?.current && active && !connecting && !!state && player.context?.state === 'running' && player.sourceConnected && !player.sourcePaused &&
   !sourcePaused && !state.paused && !state.holding && state.restoring == null;
 function releaseLive() { liveBoard.stop(); liveOwner?.release(); liveOwner = null; }
 // Events that need the listener's attention; they stay visible while browsing other views.
@@ -98,7 +98,7 @@ function update(value) {
   const wasRestoring = state?.restoring != null;
   state = value;
   if (state && active && state.ingesting && !state.paused && !state.holding && state.restoring == null) {
-    if (!player.audio?.paused) sourcePaused = false;
+    if (!player.sourcePaused) sourcePaused = false;
     if (savedDelay === null || Math.abs(savedDelay - (state.resumeDelay ?? state.delay)) > 0.02) {
       savedDelay = state.resumeDelay ?? state.delay; if (liveKey) memory.save('live', liveKey, savedDelay);
     }
@@ -113,11 +113,11 @@ function primaryStatus() {
   if (connecting) return 'Connecting…';
   if (!active) return sourceStatus;
   if (!state) return 'Connecting…';
-  // Without both an audio element and an audio context there is no output to call Playing.
-  if (!player.audio || !player.context) return 'Check playback';
+  // Without both a source and an audio context there is no output to call Playing.
+  if (!player.sourceConnected || !player.context) return 'Check playback';
   if (player.context.state !== 'running') return 'Interrupted';
   if (state.holding) return 'Paused for TV';
-  if (state.paused || sourcePaused || player.audio.paused) return sourceStatus === 'Buffer limit reached' ? 'Paused · buffer limit reached' : 'Paused';
+  if (state.paused || sourcePaused || player.sourcePaused) return sourceStatus === 'Buffer limit reached' ? 'Paused · buffer limit reached' : 'Paused';
   return sourceStatus === 'Check playback' ? 'Playing · check playback' : 'Playing';
 }
 function render() {
@@ -133,8 +133,8 @@ function render() {
   $('connect').disabled = connecting || (teams[selected].discovery === 'homestream' && !catalog.ready);
   $('stop').disabled = !active && !connecting;
   $('pause').hidden = !active;
-  $('pause').disabled = !ready || (restoring && player.context?.state === 'running' && !player.audio?.paused) || holding || specialPending;
-  $('pause').textContent = holding ? 'Paused' : state?.paused || player.audio?.paused || player.context?.state !== 'running' ? 'Resume' : 'Pause';
+  $('pause').disabled = !ready || (restoring && player.context?.state === 'running' && !player.sourcePaused) || holding || specialPending;
+  $('pause').textContent = holding ? 'Paused' : state?.paused || player.sourcePaused || player.context?.state !== 'running' ? 'Resume' : 'Pause';
   $('hold').disabled = holding ? !holdExitReady : !positionReady || specialPending || state.paused || !state.ingesting;
   $('hold').textContent = holding ? 'Resume with this delay' : 'Pause to match TV';
   $('resume-position').hidden = !ready || state?.canResumePosition === false || !state?.paused || restoring || holding || state.delay >= state.available - 0.01;
@@ -252,7 +252,9 @@ async function connect(useDemo = false) {
   try {
     const url = useDemo ? (demo = demoURL()) : game ? game.url : source.url;
     if (!url) throw Error('gateway-unavailable');
-    const started = player.start(url, restoreDelay, { hls: !!game });
+    // Only the verified audio/mpeg Duke primary is decoded into the delay engine; other stations,
+    // demo tones and game HLS keep the media element until their formats are verified.
+    const started = player.start(url, restoreDelay, { hls: !!game, mp3: !game && !useDemo && source.sourceId === 'duke-leanstream' });
     if (useDemo && player.audio) player.audio.loop = true;
     await started;
     if (mine !== generation) return;
@@ -261,11 +263,11 @@ async function connect(useDemo = false) {
       resetSourceDelay = false;
     }
     connecting = false; notice(restoreDelay > 0 && !useDemo ? `Restoring your saved ${restoreDelay.toFixed(1)}-second delay. Use Incoming audio in Match my TV to skip the wait.` : useDemo ? 'Test tone: a beep each second, higher every fifth.' : '');
-  } catch {
+  } catch (error) {
     if (mine !== generation) return;
     releaseLive(); log.boundary('source-error', state); log.end(state);
     active = connecting = false; state = null; sourceStatus = 'Could not connect'; attention = true;
-    notice(connectionHelp());
+    notice(error?.message === 'mp3-unsupported' ? 'This browser could not load the radio audio decoder. Open the official player instead.' : connectionHelp());
     refreshSessions();
     if (game) { await catalog.refresh(); return; }
   }
@@ -360,7 +362,7 @@ $('menu-reconnect').onclick = () => {
   else if (sync?.active) $('sync-play').click();
 };
 $('pause').onclick = () => {
-  if ((sourcePaused && state?.paused) || player.context?.state !== 'running' || player.audio?.paused) return connect();
+  if ((sourcePaused && state?.paused) || player.context?.state !== 'running' || player.sourcePaused) return connect();
   if (state?.paused) return command('restore', savedDelay ?? 0);
   command('pause', true);
 };
