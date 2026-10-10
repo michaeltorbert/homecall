@@ -13,9 +13,37 @@ Pause keeps collecting audio for up to three minutes. A buffer overrun cancels a
 
 ## Backup feeds
 
-For Duke, use **Audio feed** above Play to choose the network's backup connection or WSJS, WCCG, or WTIB. Changing the feed stops playback. Press Play to start the new feed with a fresh buffer and zero added delay, then check alignment. Reconnecting the same feed restores its own saved delay. Switching teams returns to that team's primary feed; feed selection itself is not saved across reloads.
+Listen plays one team- and game-first flow (see **Unified Listen** below). In normal use **Source** stays on **Automatic**. For Duke, Source can override it with the game feed, the network's backup connection or WSJS, WCCG, or WTIB. Changing the source stops playback. Press Play to start the new feed with a fresh buffer and zero added delay, then check alignment. Reconnecting the same feed restores its own saved delay. Switching teams returns to that team's primary feed; feed selection itself is not saved across reloads.
 
-The network backup is the private alternate address published by [Varsity's Duke player](https://thevarsitynetwork.com/feed/source/oas-1693); it shares the primary's broadcast provider. The three stations are listed among [Duke's affiliates](https://goduke.com/sports/2022/8/6/local-radio-affiliates) and carried postgame interview audio in September 12, 2026 samples. Their programming and availability can change, so the app never automatically switches stations or promises that a game is currently on. WKRX carried postgame during direct sample checks but failed the in-app connection check, so it is not included. The official-player link follows the selected feed, and logs identify that feed without recording its URL.
+The network backup is the private alternate address published by [Varsity's Duke player](https://thevarsitynetwork.com/feed/source/oas-1693); it shares the primary's broadcast provider. The three stations are listed among [Duke's affiliates](https://goduke.com/sports/2022/8/6/local-radio-affiliates) and carried postgame interview audio in September 12, 2026 samples. Their programming and availability can change. Automatic fallback reaches them only after the game feed, the network and its backup connection have failed. An affiliate always shows a coverage caution, and the app never promises that a game is currently on. WKRX carried postgame during direct sample checks but failed the in-app connection check, so it is not included. The official-player link follows the selected feed, and logs identify that feed without recording its URL.
+
+## Unified Listen (issue #30)
+
+Listen is the only live player. **More → Radio stations** and **More → Game broadcasts** open it at the team or game choice.
+
+- **Teams.** Every configured team, plus every school the game catalog lists, joined by explicit catalog ID. Auburn and Virginia appear once the catalog answers. Virginia Tech has no catalog identity, so it never resolves to Virginia.
+- **Order.** Candidates are tried in this order:
+  1. The selected game's published feed, once its playlist is confirmed advancing.
+  2. The network.
+  3. The network's backup connection.
+  4. The affiliates.
+
+  Duplicates are removed. Georgia Tech, Auburn and Virginia have only their game feed. No source is invented.
+- **Before Play.** While the game feed is being checked, Play is unavailable. Resolution never starts audio, and network audio never stands in for a game feed that is still being checked.
+- **Play.** Play starts the resolved candidate inside the click.
+- **Automatic fallback.** A transport or availability failure at startup moves at once to the next candidate that hasn't been tried. So does exhausted same-source recovery during a session. Each candidate is entered at most once per listening intent. Same-source retries keep their existing 1/2/4-second bounds. There is no automatic return to an earlier source.
+- **Browser denial and local failures.** A permission denial, or a suspended audio context, keeps the same source waiting for Play. So does a local audio-engine failure. None of these ever changes source.
+- **Exhaustion.** Exhaustion shows Retry and the configured official player. Auburn and Virginia have no configured official link, and the app says so instead of inventing one.
+- **Switch notice.** A brief, quiet notice appears only after a replacement source renders PCM output, which is not the same as audio heard on a device. The Source line, status, Now Playing and the session log then name the source that is actually playing. An affiliate keeps its coverage caution.
+- **Alignment after a switch.** Every cross-source switch starts at 0 seconds and resets the timestamp offset, calibration and play choices.
+- **Source override.** Source starts at Automatic. A chosen source survives Stop and Play until Automatic, a team or game change, or a reload, and it is never saved. Fallback from a chosen source moves only down the order.
+- **One engine.** Every source uses the PCM delay engine, so hold/cancel, the 180-second history, saved delay and logs work for game feeds too, Georgia Tech included.
+- **Game timing tools.** For catalog game feeds with broadcast timestamps, Match my TV also offers the existing game-timing tools: timing source, clock lookup, confirmed recorded plays and offset.
+  - **Timestamp moves.** A move inside the verified PCM history only shifts the read head. Any other move first discards buffered PCM, then moves the media, and admits audio only at the confirmed position. A move that can't be confirmed is reported. It is never a source failure.
+  - **Audio real time.** This is an estimate. The PCM read head is mapped through intervals of verified, contiguous input. It shows unavailable after a gap, drain, seek or reconnect until fresh output verifies. Output latency is not measured.
+- **Missing timestamps.** The same feed keeps playing with manual alignment and the existing notice.
+
+SyncPlayer and its tests remain for compatibility but are no longer used by the UI. Fixture tests cover these contracts, and a muted local browser diagnostic is kept outside the repository. Live feeds, phones and native HLS (iOS Safari: manual alignment only) are separate release gates; see BACKLOG **LISTEN-01**.
 
 ## Send a test log from a phone
 
@@ -212,17 +240,35 @@ becoming ready. Stopping, switching sources, a failed start and other terminal
 stops clear it. A later session always replaces an earlier one, and an earlier
 session can never clear its replacement.
 
-**What is shown.** Every mode shows one original Homecall image,
-`now-playing/homecall-512.png` (see `public/now-playing/PROVENANCE.md`). It shows
-no team logos. The text identifies the audio:
+**What is shown.** The artwork is one of five original Homecall images (see
+`public/now-playing/PROVENANCE.md`). None of them is a team logo.
 
-- **Live radio** (Duke, Miami, Virginia Tech and Duke affiliates): the station
-  name and school. Radio is never matched to a game from the kickoff time or a
-  single live event, so it never shows a score.
-- **Live game** (Georgia Tech catalog games) and **Sync game** (all four
-  supported schools): the catalog matchup, for example "Georgia Tech vs Duke".
-- **Archive**: the recording's school and opponent, with no score or result.
-- **Timing demo**: a test-tone label.
+- **Team images.** Duke, Miami, Virginia Tech and Georgia Tech each have their
+  own image: the Homecall mark over the school's plain name, for example
+  `now-playing/gt-512.png`. The image follows the school frozen when playback
+  starts. It must match an app team name exactly, ignoring only surrounding
+  spaces and letter case.
+- **Generic image.** Opponents never select an image. The test tone, and any
+  other or missing school, use the generic `now-playing/homecall-512.png`.
+  "Miami (OH)" is one example of a name that gets the generic image.
+- **No score in the image.** No score is drawn into any image, and the image
+  stays the same while the score text changes.
+
+The artist field names the part of the app that is playing, using the menu and
+tab names: `Homecall · Radio stations`, `Homecall · Game broadcasts`,
+`Homecall · Recordings` or `Homecall · Test tone`. While a score is shown, the
+matchup comes first, for example
+`Georgia Tech vs Duke · Homecall · Game broadcasts`. The title and album
+identify the audio:
+
+- **Radio stations** (Duke, Miami, Virginia Tech and Duke affiliates): the
+  station name and school. Radio is never matched to a game from the kickoff
+  time or a single live event, so it never shows a score.
+- **Game broadcasts**: the catalog matchup, for example "Georgia Tech vs Duke".
+  This covers Georgia Tech catalog games played from Listen and broadcasts for
+  all four supported schools.
+- **Recordings**: the recording's school and opponent, with no score or result.
+- **Test tone**: the test-tone title.
 
 **Score, period and clock (catalog-bound games only).** While the game audio is
 actually playing, the page reads the existing `/api/sync/status/<team-id>/<year>`

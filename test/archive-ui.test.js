@@ -208,37 +208,28 @@ test('the default aging timer runs every 60 seconds on the page window',async t=
   const intervals=[];const h=harness(t,undefined,undefined,undefined,{beforeSetup:dom=>{dom.window.setInterval=(fn,ms)=>{intervals.push(ms);return 0;};}});await settle();
   assert.deepEqual(intervals,[60_000]);assert.match(h.$('archive-note').textContent,/recordings · Catalog checked/);
 });
-test('More → Game broadcasts activates without stopping live audio; Listen returns to it and keyboard navigation has exactly two destinations',async t=>{
- let activated=0,deactivated=0;const sync={active:false,activate(){activated++},deactivate(){deactivated++}};
- const h=harness(t,undefined,undefined,sync);await settle();h.$('nav-broadcasts').click();
- assert.equal(activated,1);assert.equal(h.$('sync-panel').hidden,false);assert.equal(h.$('live-panel').hidden,true);assert.equal(h.$('archive-panel').hidden,true);assert.equal(h.counts().stops,0);
- assert.equal(h.$('listen-tab').getAttribute('aria-selected'),'true');assert.equal(h.$('listen-tab').getAttribute('aria-controls'),'sync-panel');
- assert.equal(h.$('nav-broadcasts').getAttribute('aria-current'),'true');assert.equal(document.body.dataset.view,'sync');
+// Superseded: Game broadcasts is now an alias of the one Listen view (no separate panel or prompt).
+test('More → Radio stations and Game broadcasts both open Listen without stopping its audio; keyboard navigation has exactly two destinations',async t=>{
+ const h=harness(t);await settle();h.$('archive-tab').click();
+ h.dom.window.document.getElementById('game-panel').hidden=false;h.$('game').disabled=false;
+ h.$('nav-broadcasts').click();
+ assert.equal(h.$('live-panel').hidden,false);assert.equal(h.$('archive-panel').hidden,true);assert.equal(h.counts().stops,0,'browsing never stops Listen audio');
+ assert.equal(h.$('listen-tab').getAttribute('aria-selected'),'true');assert.equal(h.$('listen-tab').getAttribute('aria-controls'),'live-panel');
+ assert.equal(document.body.dataset.view,'live');assert.equal(document.activeElement.id,'game','Game broadcasts focuses the game choice');
  assert.deepEqual([...document.querySelectorAll('[role=tab]')].map(tab=>tab.id),['listen-tab','archive-tab'],'no hidden third tab');
- h.$('listen-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'archive-tab');assert.equal(h.$('sync-panel').hidden,true);assert.equal(deactivated,2);
- h.$('archive-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'listen-tab');
- assert.equal(h.$('sync-panel').hidden,false,'Listen returns to the last listening view');assert.equal(activated,2);
- h.$('nav-radio').click();assert.equal(h.$('live-panel').hidden,false);assert.equal(h.$('sync-panel').hidden,true);assert.equal(h.counts().stops,0);
-});
-test('leaving an active game broadcast asks first; Cancel keeps the view and audio, Continue tears it down',async t=>{
- let deactivated=0;const sync={active:false,activate(){},deactivate(){deactivated++;this.active=false;}};
- const h=harness(t,undefined,undefined,sync);await settle();h.$('nav-broadcasts').click();const settled=deactivated;sync.active=true;
- for(const leave of [()=>h.$('archive-tab').click(),()=>h.$('nav-radio').click()]){
-  leave();assert.equal(h.prompt(),true);assert.equal(deactivated,settled);
-  h.dismiss();assert.equal(h.$('sync-panel').hidden,false);assert.equal(h.$('listen-tab').getAttribute('aria-selected'),'true');assert.equal(sync.active,true);
- }
- h.$('archive-tab').click();h.proceed();
- assert.equal(h.$('archive-panel').hidden,false);assert.equal(deactivated,settled+1);assert.equal(sync.active,false);assert.equal(document.activeElement.id,'archive-tab');
+ h.$('listen-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'archive-tab');
+ h.$('archive-tab').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(document.activeElement.id,'listen-tab');assert.equal(h.$('live-panel').hidden,false);
+ h.dom.window.document.getElementById('game-panel').hidden=true;h.$('nav-broadcasts').click();assert.equal(document.activeElement.id,'team','without a game choice the team choice is focused');
+ h.$('nav-radio').click();assert.equal(h.$('live-panel').hidden,false);assert.equal(document.activeElement.id,'team');assert.equal(h.counts().stops,0);
 });
 test('leaving a loaded recording for any listening view asks first; Escape cancels',async t=>{
- const sync={active:false,activate(){},deactivate(){}};
- const h=harness(t,undefined,undefined,sync);await settle();h.$('archive-tab').click();h.$('archive-list').querySelector('button').click();
+ const h=harness(t);await settle();h.$('archive-tab').click();h.$('archive-list').querySelector('button').click();
  for(const id of ['listen-tab','nav-radio','nav-broadcasts']){
   h.$(id).click();assert.equal(h.prompt(),true,id);
   h.$('confirm-dialog').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   assert.equal(h.prompt(),false);assert.equal(h.audio.src,item.url);assert.equal(h.$('archive-panel').hidden,false);assert.equal(h.$('archive-tab').getAttribute('aria-selected'),'true');
  }
- h.$('nav-broadcasts').click();h.proceed();assert.equal(h.audio.hasAttribute('src'),false);assert.equal(h.$('sync-panel').hidden,false);
+ h.$('nav-broadcasts').click();h.proceed();assert.equal(h.audio.hasAttribute('src'),false);assert.equal(h.$('live-panel').hidden,false);assert.equal(document.activeElement.id,'team');
 });
 test('a recording takes over from radio only after Continue; Cancel leaves radio, audio and bookmarks untouched',async t=>{
  const saved=[];let radio=true;

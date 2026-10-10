@@ -131,3 +131,21 @@ test('a native pause after recovery retains the new valid position',()=>{
  feed(e,new Array(12).fill(2));feed(e,[3,4]);assert.equal(e.snapshot().paused,false);
  e.command('interrupt',true);assert.equal(e.snapshot().canResumePosition,true);
 });
+
+// Media-position discontinuity (timestamp seek): flush discards every buffered sample before the media moves.
+test('flush discards buffered audio, gates input until confirmed and keeps the cumulative coordinate',()=>{
+ const e=engine(4);feed(e,[1,2,3,4,5,6,7,8]);e.command('delay',1);
+ const ack=e.command('flush');assert.equal(ack.result,'applied');
+ assert.deepEqual({delay:ack.after.delay,available:ack.after.available,ingesting:ack.after.ingesting,restoring:ack.after.restoring,received:ack.after.receivedSeconds},{delay:0,available:0,ingesting:false,restoring:null,received:2});
+ assert.deepEqual(feed(e,[9,10]).samples,[0,0],'old samples never render after the flush and transitional input is discarded');
+ assert.equal(e.snapshot().receivedSeconds,2,'gated transitional input is not received');
+ e.command('ingest',true);assert.deepEqual(feed(e,[11,12]).samples,[11,12]);
+ assert.equal(e.snapshot().receivedSeconds,2.5);assert.equal(e.snapshot().canResumePosition,false);
+});
+test('flush wins over a pending restore and pending recovery but never breaks a hold',()=>{
+ const e=engine(4);e.command('restore',2);feed(e,[1,2]);
+ assert.equal(e.command('flush').after.restoring,null);e.command('ingest',true);assert.deepEqual(feed(e,[3,4]).samples,[3,4]);
+ e.command('delay',.5);e.command('interrupt');assert.equal(e.command('flush').result,'applied');
+ e.command('ingest',true);feed(e,[5,6]);assert.equal(e.snapshot().restoring,null,'a flushed recovery target is not restored later');
+ e.command('hold');const held=e.command('flush');assert.equal(held.result,'holding');assert.equal(held.after.holding,true);
+});

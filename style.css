@@ -1,5 +1,5 @@
 /* Homecall · compact graphite player with one stable blue accent.
-   Order: tokens, base, controls, shell, menu, alerts, player, matching, broadcasts, recordings,
+   Order: tokens, base, controls, shell, menu, alerts, player, matching, game timing, recordings,
    dialogs, responsive, motion. */
 
 /* ---------- Tokens ---------- */
@@ -151,7 +151,9 @@ dd { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- Shell ---------- */
 .app-shell { max-width: 700px; margin: 0 auto; padding: 24px 28px 40px; }
-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+/* Wraps only when the brand and More cannot share a row (large text at 320px); More stays right-aligned. */
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 8px; margin-bottom: 24px; }
+.menu-wrap { margin-left: auto; }
 .brand { color: var(--ink); font-size: 29px; font-weight: 730; letter-spacing: -0.8px; line-height: 1.2; }
 .brand:hover { text-decoration: none; }
 .icon-button {
@@ -268,6 +270,19 @@ body[data-view=live] #owner-strip { display: none !important; }
 .field-meta button { flex: 0 0 auto; }
 .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+/* The source actually playing (or about to play) stays visible; the switch notice is brief and quiet. */
+.source-current { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.source-current:empty { display: none; }
+.switch-notice {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--blue);
+  background: #1a2233;
+  color: var(--ink);
+  font-size: 13px;
+  transition: opacity 0.6s;
+}
+.switch-notice.fading { opacity: 0; }
 .notice { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
 .notice:empty { display: none; }
 .notice.attention {
@@ -280,6 +295,7 @@ body[data-view=live] #owner-strip { display: none !important; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .actions > * { flex: 1; }
 #recovery-actions { margin: 0; padding: 0 14px 12px; background: var(--warn-bg); border-left: 3px solid var(--warn-edge); }
+#recovery-actions > #recover-note { flex: 1 1 100%; margin: 0; color: var(--warn-ink); }
 .transport { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; margin: 22px 0; }
 .transport button { min-height: 51px; }
 .resume-row { margin: -10px 0 18px; }
@@ -317,10 +333,8 @@ body[data-view=live] #owner-strip { display: none !important; }
 .matching-footer button { font-size: 13px; }
 #alignment { margin: 10px 0 0; font-size: 12px; }
 
-/* ---------- Game broadcasts ---------- */
-#sync-panel > .field-meta { margin: 2px 0 14px; }
-#sync-game-panel { margin-top: 0; }
-#sync-game-status-help { margin: 8px 0 0; font-size: 12px; }
+/* ---------- Game timing (catalog game feeds inside Match my TV) ---------- */
+.timing-tools { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
 .sync-source { margin-bottom: 14px; }
 .sync-source .field, .sync-source label { display: block; margin-bottom: 7px; }
 #sync-mapping-note:empty { display: none; }

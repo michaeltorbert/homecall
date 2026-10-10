@@ -78,7 +78,8 @@ Release stays 0.4.0; the build hash identifies the deployment. Issue #19 stays o
 
 - **NOW-PLAYING-01 (open, native/live/car gate)**: Verify on supported phones (iPhone lock screen; Android if the owner elects) and the car integration actually used: artwork, title, artist and album text, truncation, and the existing controls.
   - Device, browser and car models are unknown. The original issue photos were not available to implementation.
-  - Exercise each mode: Live radio, Live GT game, Sync game, Archive and demo.
+  - Exercise each mode: Radio stations, a Georgia Tech game from Listen, Game broadcasts, Recordings and Test tone.
+  - Check each of the five artwork images on the device: Duke, Miami, Virginia Tech and Georgia Tech, plus the generic image. Check crop, legibility of the school name and caching across a source switch. Local browser renderings in the evidence showcase are not device proof.
   - Exercise stale and terminal cases: pause, reconnect, stop, game end, source switch, and a live-to-final transition.
   - During an actual supported live game, record the raw competition- and event-level status, period, clock and score fields, plus the deployed `scoreboard` across polls.
   - Live and halftime shapes are synthetic until then. Between-period names such as `STATUS_END_PERIOD` intentionally show identity only.
@@ -89,7 +90,12 @@ Release stays 0.4.0; the build hash identifies the deployment. Issue #19 stays o
   - The title may be truncated by the platform, but source and receipt time come before the score.
   - Blanket clearing on `visibilitychange: hidden` was rejected because it would remove the requested locked-screen information. Revisit only with device evidence.
 - **NOW-PLAYING-03 (follow-up; disclosed fallback)**: Ordinary Live radio (Duke and affiliates, Miami, Virginia Tech) has no bound game and never shows a score. Identity-only metadata is the graceful fallback #19 asks for when game data is unavailable, not a removal of the score requirement for bound games. A durable, explicit radio-to-game association would be needed first; never guess from kickoff time, a single live event or fuzzy names (Virginia Tech ≠ Virginia).
-- **NOW-PLAYING-ART-01 (optional follow-up)**: This release ships one original Homecall PNG for every mode and school (`public/now-playing/PROVENANCE.md`). #19 says the presentation *can* include team or matchup artwork, so the original image is the defined fallback rather than an exception. Optional team-specific artwork needs appropriate source/rights review and native verification. No per-team map, mark redistribution, runtime CDN or proxy is authorized.
+- **NOW-PLAYING-ART-01 (source implemented in the local candidate; native verification open)**: The owner has now requested team-specific artwork. This supersedes the earlier note that no per-team map was authorized.
+  - **Source.** Duke, Miami, Virginia Tech and Georgia Tech each get an original 512 × 512 PNG: the Homecall mark over the plain school name, drawn as geometric strokes with no font. There are no logos, monograms, mascots or redistributed marks.
+  - **Generic image.** `homecall-512.png` is unchanged. It remains the image for Test tone and for any unknown, missing or non-exact school.
+  - **Matching.** Only the frozen selected school selects an image, by exact app team name. There is no fuzzy matching, and bare "Miami" means Miami (FL), a disclosed residual. See `public/now-playing/PROVENANCE.md`.
+  - **Serving.** Images are same-origin static files only, with no runtime CDN or proxy.
+  - **Still open.** Native crop, legibility and caching remain unverified under NOW-PLAYING-01. No release is claimed.
 - **NOW-PLAYING-RELEASE-01 (released)**: [PR #22](https://github.com/michaeltorbert/homecall/pull/22) was released from source `e82fcc0` with 332 tests passing and production status-route, served-build and served-PNG checks recorded in its release record. The release followed this order:
   1. Deploy the Worker only from the merge-reviewed tree.
   2. Pages deploys automatically after merge. An older Worker without `scoreboard` degrades to identity-only metadata.
@@ -104,7 +110,7 @@ Original #19 outcome ledger (met / partial / unverified / excepted; [issue #19](
 
 | Original requirement | Status | Evidence / remaining |
 |---|---|---|
-| Team or matchup artwork/logos | Met by the defined fallback | One original Homecall PNG in every mode; team art is optional (NOW-PLAYING-ART-01). |
+| Team or matchup artwork/logos | Met at source in the local candidate (original team images, not logos); released state is the generic fallback | Four original school-name images plus the generic fallback (NOW-PLAYING-ART-01); native display unverified (NOW-PLAYING-01). |
 | Current score | Met at source for catalog-bound Live and Sync games; radio is a disclosed fallback | NOW-PLAYING-03. |
 | Quarter/period and clock when available | Met at source and in fixtures | Live and halftime provider shapes unverified until an actual supported game. |
 | Clear live-game label and matchup | Met at source | Real live-game usefulness unverified. |
@@ -199,3 +205,22 @@ Limited exceptions for #12 and #19 (intermediate; none closes an issue or is a p
   - Invalid chronology or edge: generic copy.
 
   Expired or gapped targets are never clamped or interpolated. On connected audio, user seeks, Jump to incoming, pause and native-control pointer/keyboard gestures cancel restoration. During unloaded retry backoff, in-page movement is disabled; native-control pointer/keyboard gestures still cancel and Stop remains available. Later intent clears a completed recovery notice. Listeners may briefly hear incoming audio first, and post-seek loading adds delay. TV alignment is not guaranteed. Server-side, game capabilities now last six hours and expired ones answer 403, so expiry no longer causes this during a game; provider hiccups still do. Real-browser/phone acceptance remains open under DEVICE-01, CONTINUITY-01 and TIMING-01.
+
+## Unified Listen (issue #30; release candidate; physical-device checks accepted after release)
+
+- **LISTEN-01 (open; owner accepted physical phone/TV checks after release on October 10, 2026):** Fixtures and a muted local Chrome diagnostic do not establish live behavior. On an actual phone and real feeds during a game, verify:
+  - Automatic order and a real game-feed failure moving to the network.
+  - That the switch notice appears only after audible output.
+  - That a browser denial waits on the same source.
+  - Timestamp seeks: in history, by media move, and their restoration after reconnect.
+  - That the estimated audio time agrees with the commentary.
+  - Native-HLS manual-only behavior on iOS.
+- **LISTEN-02 (accepted risk, watch):** The player's same-source retry budget (three) is not renewed during one connection, so a long game with repeated network blips can exhaust it and fall back. This issue sets no new retry counts.
+- **LISTEN-03 (documented interpretation):** "Official player link" on exhaustion preserves every configured link (Duke and its backups, Miami, Virginia Tech, Georgia Tech). Auburn and Virginia have none configured, so exhaustion says so and nothing is invented.
+- **LISTEN-04 (disposition):** After a fallback the game catalog is not rechecked in the background, because a reload would stop the replacement. Refresh games stays available. The older "failed GT start refreshes the catalog" behavior is superseded.
+- **LISTEN-05 (superseded assertions, listed):** The following replace earlier behavior:
+  - "Choose another source" failure copy is replaced by Retry and the official link.
+  - Source lists Automatic and the game feed first.
+  - Game broadcasts is a Listen alias, with no separate panel, leave prompt or element player.
+  - The Sync Back/Ahead seek buttons are replaced by the PCM nudges.
+  - Stop stays usable for a source waiting on Play.

@@ -1,10 +1,15 @@
-import { liveSourceIds } from './teams.js';
+import { liveSourceIds, teams, catalogTeams } from './teams.js';
 export const PREFIX = 'mystream.session.';
 export const REASONS = ['unspecified', 'initial', 'commercial', 'drift', 'interruption'];
 export const PROVIDERS = ['unspecified', 'youtube-tv', 'cable', 'antenna', 'other'];
 export const OUTPUTS = ['unspecified', 'phone', 'wired', 'bluetooth', 'other'];
-const ACTIONS = ['pause', 'restore', 'nudge', 'delay', 'live', 'hold', 'complete', 'cancel', 'confirm'];
-const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-restored', 'context-interrupted', 'control-overflow', 'resume-failed', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible'];
+// Why this listening session started: Play, Retry, automatic fallback, a Source override or a resume.
+export const TRIGGERS = ['play', 'retry', 'fallback', 'override', 'resume'];
+const ACTIONS = ['pause', 'restore', 'nudge', 'delay', 'live', 'hold', 'complete', 'cancel', 'confirm', 'seek'];
+const EVENTS = ['start', 'end', 'request', 'ack', 'command-failed', 'confirmed', 'episode-abandoned', 'heartbeat', 'observation-gap', 'source-playing', 'source-waiting', 'source-stalled', 'source-ended', 'source-paused', 'source-error', 'context-restored', 'context-interrupted', 'control-overflow', 'resume-failed', 'engine-error', 'command-timeout', 'buffer-overrun', 'hidden', 'visible',
+  'output-ready', 'source-reconnecting', 'source-reconnected', 'source-reconnect-required', 'source-reconnect-exhausted', 'timeline-restored', 'timeline-fallback', 'timeline-canceled'];
+// Configured team keys only; an unconfigured catalog school is logged as 'catalog', never by name or ID.
+const logTeam = team => Object.hasOwn(teams, team) || Object.hasOwn(catalogTeams, team) ? team : String(team).startsWith('catalog:') ? 'catalog' : 'unknown';
 const cleanState = (state) => {
   const value = {};
   for (const key of ['resumeDelay', 'restoring', 'delay', 'available', 'receivedSeconds', 'renderedSeconds', 'contextSeconds'])
@@ -18,15 +23,17 @@ export class SessionLog {
     this.maxEvents = maxEvents; this.maxSessions = maxSessions; this.build = build;
     this.onWarning = onWarning; this.memory = new Map(); this.sequence = 0;
   }
-  start(team, sourceId, mode = 'live', provider = 'unspecified', output = 'unspecified') {
+  start(team, sourceId, mode = 'live', provider = 'unspecified', output = 'unspecified', { trigger, previousSourceId } = {}) {
     if (this.session) this.end();
     this.origin = this.now(); this.sequence = 0; this.episode = null; this.confirmed = false; this.observation = null;
     this.session = { schemaVersion: 1, app: 'Homecall', build: this.build,
-      id: this.id(), team: ['duke', 'miami', 'vt', 'gt'].includes(team) ? team : 'unknown',
+      id: this.id(), team: logTeam(team),
       sourceId: [...liveSourceIds, 'test-tone'].includes(sourceId) ? sourceId : 'unknown',
       mode: mode === 'demo' ? 'demo' : 'live', provider: PROVIDERS.includes(provider) ? provider : 'unspecified',
       output: OUTPUTS.includes(output) ? output : 'unspecified', startedAt: this.utc(), endedAt: null,
       truncatedEvents: 0, userConfirmedObservedSeconds: 0, observedPlaybackSeconds: 0, confirmedEpisodes: 0, events: [] };
+    if (TRIGGERS.includes(trigger)) this.session.trigger = trigger;
+    if (liveSourceIds.includes(previousSourceId)) this.session.previousSourceId = previousSourceId;
     this.add('start'); return this.session.id;
   }
   add(type, details = {}, state) {
@@ -37,7 +44,7 @@ export class SessionLog {
     if (Number.isFinite(details.requestedValue) || typeof details.requestedValue === 'boolean') event.requestedValue = details.requestedValue;
     for (const key of ['action']) if (ACTIONS.includes(details[key])) event[key] = details[key];
     if (REASONS.includes(details.reason)) event.reason = details.reason;
-    if (['applied', 'restoring', 'holding', 'unavailable', 'unknown'].includes(details.result)) event.result = details.result;
+    if (['applied', 'restoring', 'holding', 'unavailable', 'unknown', 'history', 'failed', 'canceled'].includes(details.result)) event.result = details.result;
     if (details.before) event.before = cleanState(details.before);
     if (details.after) event.after = cleanState(details.after);
     if (state) event.state = cleanState(state);

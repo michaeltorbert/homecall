@@ -9,12 +9,13 @@ import { once } from 'node:events';
 const root=process.env.HOMECALL_STATIC_ROOT?path.resolve(process.env.HOMECALL_STATIC_ROOT):fileURLToPath(new URL('./dist/',import.meta.url));
 const types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.wasm':'application/wasm','.json':'application/json','.png':'image/png'};
 // Exact static allowlist, served at the root and under the Pages base path /homecall/:
-// the index, flat build assets and the one Now Playing artwork file. Nothing else is read.
+// the index, flat build assets and the five Now Playing artwork PNGs. Nothing else is read.
+const ARTWORK=new Set(['homecall','duke','miami','vt','gt'].map(name=>`/now-playing/${name}-512.png`));
 const staticFile=pathname=>{
   const match=/^(?:\/homecall)?(\/.*)$/.exec(pathname), local=match?.[1];
   if(local==='/') return 'index.html';
   if(/^\/assets\/(?!\.)[A-Za-z0-9_.-]+$/.test(local)) return local.slice(1);
-  if(local==='/now-playing/homecall-512.png') return 'now-playing/homecall-512.png';
+  if(ARTWORK.has(local)) return local.slice(1);
   return null;
 };
 const server=http.createServer(async(req,res)=>{

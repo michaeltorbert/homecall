@@ -21,18 +21,23 @@ test('index keeps every controller ID once, the signed control sets and no third
   for (const id of ['team', 'feed', 'feed-picker', 'game-panel', 'game', 'game-note', 'game-refresh', 'station', 'status', 'notice', 'connect', 'pause', 'stop', 'resume-position',
     'volume', 'hold', 'cancel', 'confirm', 'live', 'scrub', 'scrub-label', 'delay', 'buffer', 'alignment', 'sync-help', 'official', 'source-note', 'demo', 'provider', 'output', 'reason',
     'storage-warning', 'sessions', 'preview', 'log-summary', 'export', 'share', 'copy', 'download', 'share-status', 'clear', 'clear-confirm', 'build',
-    'sync-team', 'sync-team-note', 'sync-teams-retry', 'sync-game-panel', 'sync-game', 'sync-game-status-help', 'sync-game-note', 'sync-game-refresh', 'sync-title', 'sync-audio', 'sync-play', 'sync-stop',
-    'sync-playback', 'sync-mapped', 'sync-audio-time', 'sync-now', 'sync-range', 'sync-range-note', 'sync-mapping-note', 'sync-timing-retry', 'sync-timing-source', 'sync-clock-form', 'sync-quarter',
-    'sync-clock', 'sync-apply', 'sync-incoming', 'sync-result', 'sync-matches', 'sync-offset',
+    'source-current', 'switch-notice', 'recover-note', 'game-status-help', 'timing-tools',
+    'sync-mapped', 'sync-audio-time', 'sync-now', 'sync-range', 'sync-range-note', 'sync-mapping-note', 'sync-timing-retry', 'sync-timing-source', 'sync-clock-form', 'sync-clock-fields', 'sync-quarter',
+    'sync-clock', 'sync-apply', 'sync-result', 'sync-matches', 'sync-offset',
     'archive-team', 'archive-sport', 'archive-year', 'archive-note', 'archive-retry', 'replay-player', 'replay-title', 'replay-audio', 'replay-speed', 'replay-hold', 'replay-resume', 'replay-stop',
-    'replay-status', 'archive-list', 'archive-official', 'live-panel', 'sync-panel', 'archive-panel']) assert.ok(doc.getElementById(id), id);
+    'replay-status', 'archive-list', 'archive-official', 'live-panel', 'archive-panel']) assert.ok(doc.getElementById(id), id);
+  // One Listen route: the separate Game broadcasts panel, its element player and duplicate nudges are gone.
+  for (const id of ['sync-panel', 'sync-audio', 'sync-play', 'sync-stop', 'sync-team', 'sync-game', 'sync-incoming', 'sync-playback']) assert.equal(doc.getElementById(id), null, id);
+  assert.equal(doc.querySelectorAll('audio').length, 1, 'only the recordings element remains; Listen audio is owned by the PCM engine');
+  assert.ok(doc.getElementById('matching').contains(doc.getElementById('timing-tools')), 'game timing lives in Match my TV');
+  assert.equal(doc.getElementById('switch-notice').getAttribute('role'), 'status'); assert.equal(doc.getElementById('switch-notice').hasAttribute('data-warning-source'), false, 'the switch notice never replaces warnings');
   assert.deepEqual([...doc.querySelectorAll('[data-nudge]')].map(b => Number(b.dataset.nudge)), [-5, -1, -0.25, 0.25, 1, 5]);
-  assert.deepEqual([...doc.querySelectorAll('[data-sync-nudge]')].map(b => Number(b.dataset.syncNudge)), [-1, -0.25, 0.25, 1]);
+  assert.equal(doc.querySelectorAll('[data-sync-nudge]').length, 0);
   assert.deepEqual([...doc.querySelectorAll('[data-replay-seek]')].map(b => Number(b.dataset.replaySeek)), [-15, -1, -0.25, 0.25, 1, 15]);
   assert.deepEqual([...doc.getElementById('replay-speed').options].map(o => o.value), ['0.75', '1', '1.25', '1.5', '2']);
   assert.deepEqual([...doc.querySelectorAll('[role=tab]')].map(tab => tab.textContent), ['Listen', 'Recordings']);
   assert.equal(doc.getElementById('sync-timing-source').value, '', 'timing source starts unset');
-  assert.equal(doc.getElementById('sync-audio').hasAttribute('controls'), true); assert.equal(doc.getElementById('replay-audio').hasAttribute('controls'), true);
+  assert.equal(doc.getElementById('replay-audio').hasAttribute('controls'), true);
   assert.equal(doc.querySelector('[data-sample], .preview-strip'), null, 'no design-preview scaffolding ships');
   for (const warning of ['storage-warning']) assert.equal(doc.getElementById(warning).closest('dialog, details, [role=menu]'), null, 'critical warnings live outside closed tools');
 });
@@ -107,7 +112,7 @@ test('disclosures swap the entry for the panel and Close returns focus to the en
   assert.equal(doc.activeElement.id, 'matching-title');
   $('match-close').click();
   assert.equal($('matching').hidden, true); assert.equal($('match-toggle').hidden, false); assert.equal(doc.activeElement.id, 'match-toggle');
-  setDisclosure(doc, 'sync-matching', true); assert.equal($('sync-matching').hidden, false);
+  setDisclosure(doc, 'matching', true); assert.equal($('matching').hidden, false);
 });
 
 test('Homestream without a guard changes games and refreshes directly', async t => {
@@ -137,9 +142,9 @@ test('mirrors copy always-on warnings and flagged controller alerts only, and fo
   $('storage-warning').textContent = 'Playback positions could not be saved on this browser.'; await settle();
   assert.match(logs(), /could not be saved/); assert.match(logs(), /three attempts/);
   assert.equal(strip(), 'The source could not reconnect after three attempts.', 'the owner strip mirrors only the radio notice');
-  $('sync-playback').textContent = 'The stream stopped.'; $('sync-playback').dataset.alert = 'on'; await settle();
-  assert.match(logs(), /stream stopped/);
-  $('notice').dataset.alert = ''; $('sync-playback').dataset.alert = ''; $('storage-warning').textContent = ''; await settle();
+  $('replay-status').textContent = 'This recording could not play.'; $('replay-status').dataset.alert = 'on'; await settle();
+  assert.match(logs(), /recording could not play/); assert.equal(strip(), 'The source could not reconnect after three attempts.', 'the owner strip still mirrors only the Listen notice');
+  $('notice').dataset.alert = ''; $('replay-status').dataset.alert = ''; $('storage-warning').textContent = ''; await settle();
   assert.equal(logs(), ''); assert.equal(strip(), '');
   mirrorWarnings(doc); assert.equal(logs(), '');
 });
