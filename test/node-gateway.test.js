@@ -21,6 +21,10 @@ test('Node HTTP keeps full target validation and rejects TRACE/POST without cras
   assert.equal(await request('/api/sync/%74eams'),404);
   assert.equal(await request('/api/sync/plays/1?event=2'),404);
   assert.equal(await request('/api/sync/missing'),404);
+  // The Duke schedule route is delegated to the Worker; with no player configured it fails closed, no network.
+  assert.equal(await request('/api/broadcast/schedule/duke'),502);
+  for (const target of ['/api/broadcast/schedule/vt','/api/broadcast/schedule/duke?x=1','/api/broadcast/schedule/%64uke','/api/broadcast/schedule/duke/']) assert.equal(await request(target),404,target);
+  assert.equal(await request('/api/broadcast/schedule/duke','POST'),405);
   const projected=await (await fetch(url+'/api/catalog/live')).json();
   assert.equal(projected[0].id,'fixture');assert.equal(new URL(projected[0].url).pathname,'/media/live/fixture');
   assert.ok(!JSON.stringify(projected).includes('audio.example'));

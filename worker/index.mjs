@@ -13,13 +13,13 @@ export default {
     const target = request.url.replace(/^https?:\/\/[^/]+/, '');
     if (target.startsWith('/media/') || target.startsWith('/api/catalog/')) return streamGateway(request, env, {origins, target, nativeBody:env.MEDIA_STREAM_MODE==='native'});
     let catalog;
-    if (target.startsWith('/api/homestream/') && !target.includes('?') && !target.includes('%')) {
+    if ((target.startsWith('/api/homestream/') && !target.includes('?') && !target.includes('%')) || target === '/api/broadcast/schedule/duke') {
       try { catalog = await readPrivateCatalog(env); } catch { /* Router still validates method/path before failing closed. */ }
     }
     let cache;
     try { cache = caches.default; } catch { /* Optional optimization. */ }
     const routeFamily = new URL(request.url).pathname.split('/').slice(1, 4).join('/');
-    const allowedFamilies = ['api/sync/teams', 'api/sync/schedule', 'api/sync/plays', 'api/sync/status', 'api/homestream/teams', 'api/homestream/games'];
+    const allowedFamilies = ['api/sync/teams', 'api/sync/schedule', 'api/sync/plays', 'api/sync/status', 'api/homestream/teams', 'api/homestream/games', 'api/broadcast/schedule'];
     const correlationId = crypto.randomUUID();
     const diagnostic = detail => console.warn(JSON.stringify({ event: 'metadata-failure', version: 'timing-diagnostics-v1', correlationId, route: allowedFamilies.includes(routeFamily) ? routeFamily : 'unknown', ...detail }));
     return metadataGateway(request, { origins, cache, ctx, diagnostic, catalog });

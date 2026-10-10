@@ -6,7 +6,7 @@ import worker from '../worker/index.mjs';
 import { metadataURL, validateGatewayOrigin } from '../src/gateway.js';
 import { createTimingFreshness, nextPollDelay } from '../src/timing-freshness.js';
 import { spawnSync } from 'node:child_process';
-const catalog={schemaVersion:1,version:'test-v1',updatedAt:'2026-09-01T00:00:00Z',live:{fixture:{url:'https://audio.example/live',allowedOrigins:['https://audio.example'],kind:'audio'}},archive:{checkedAt:'2026-09-01T00:00:00Z',schools:{}},discovery:{homestreamBase:'https://discovery.example',mediaOrigins:['https://audio.example']}};
+const catalog={schemaVersion:1,version:'test-v1',updatedAt:'2026-09-01T00:00:00Z',live:{fixture:{url:'https://audio.example/live',allowedOrigins:['https://audio.example'],kind:'audio'}},archive:{checkedAt:'2026-09-01T00:00:00Z',schools:{}},discovery:{homestreamBase:'https://discovery.example',mediaOrigins:['https://audio.example']},archiveConfig:{dukePlayer:'https://player.example/',dukeFeedPath:'/previous.xml',replayRules:{}}};
 const uuid = '410422f0-663f-4e3d-82e2-787d954ae29d';
 const upstream = url => {
   if (url.includes('/summary?')) return {header:{id:new URL(url).searchParams.get('event'),uid:`s:20~l:23~e:${new URL(url).searchParams.get('event')}`,league:{id:'23',slug:'college-football'},season:{year:2026},competitions:[{id:new URL(url).searchParams.get('event'),competitors:[{team:{id:'150'}},{team:{id:'356'}}]}]},drives:{previous:[],current:{plays:[]}}};
@@ -16,16 +16,21 @@ const upstream = url => {
   return {success:true,teams:[{team_id:uuid,school_name:'Georgia Tech'}]};
 };
 const makeRequest = (target, options) => new Request(`https://gateway.example${target}`,options);
-const fetcher = async url => Response.json(upstream(String(url)));
+// SYNTHETIC Duke player page and live schedule feed (issue #32); the signed query must never leave the backend.
+const LIVE_FEED = 'https://player.example/live.xml?expires=1&signature=SECRET-SIGNATURE';
+const SCHEDULE_PAGE = `<script>var event_xml_urls = {live: "${LIVE_FEED}", previous: "https://player.example/previous.xml"};</script>`;
+const SCHEDULE_XML = '<main><sports><sport><id>1</id><name>Football</name><is_show>0</is_show></sport></sports><events><current_ev/><upcoming_ev><event><id>e1</id><start_timestamp>1792260000</start_timestamp><end>2026-10-18 03:00:00</end><sport_id>1</sport_id><opponent>Visitor</opponent><url>https://media.example/live</url></event></upcoming_ev></events></main>';
+const fetcher = async (url, init) => String(url) === 'https://player.example/' ? new Response(SCHEDULE_PAGE) : String(url) === LIVE_FEED ? new Response(SCHEDULE_XML, init?.dated ? {headers:{Date:init.dated}} : {}) : Response.json(upstream(String(url)));
 
-test('shared router serves exactly six minimized route families and timing age in both deliveries', async () => {
-  for (const target of ['/api/homestream/teams',`/api/homestream/games/${uuid}`,'/api/sync/teams','/api/sync/schedule/150/2026','/api/sync/plays/401856671','/api/sync/status/150/2026']) {
+test('shared router serves exactly seven minimized route families and timing age in both deliveries', async () => {
+  for (const target of ['/api/homestream/teams',`/api/homestream/games/${uuid}`,'/api/sync/teams','/api/sync/schedule/150/2026','/api/sync/plays/401856671','/api/sync/status/150/2026','/api/broadcast/schedule/duke']) {
     let wall = 100000;
     const response = await metadataGateway(makeRequest(target), {fetcher, catalog, now:()=>wall++});
     assert.equal(response.status,200);
     assert.equal(response.headers.get('Cache-Control'),'no-store');
     const data = await response.json();
     if (target.includes('/plays/')) { assert.ok(data.checkedAt >= 100000); assert.equal(data.ageMs,null); assert.equal(data.schemaVersion,2); assert.equal(data.eventId,'401856671'); }
+    else if (target.includes('/broadcast/')) { assert.deepEqual(data,{schemaVersion:1,school:'duke',state:'upcoming',event:{id:'e1',label:'Football: Visitor',kind:'game',broadcastStart:1792260000000},checkedAt:data.checkedAt,ageMs:null}); assert.ok(data.checkedAt >= 100000); }
     else if (target.includes('/status/')) { assert.deepEqual(data,{schemaVersion:1,teamId:'150',season:2026,checkedAt:data.checkedAt,ageMs:null,events:[]}); assert.ok(data.checkedAt >= 100000); }
     else assert.ok(Array.isArray(data));
   }
@@ -61,7 +66,7 @@ test('Worker HTTP boundary rejects full queries, encoding, media, hosts, invalid
   let calls = 0;
   globalThis.fetch = async () => { calls++; throw Error('unexpected fetch'); };
   try {
-    for (const target of ['/api/sync/teams?host=evil','/api/sync/teams?','/api/sync/%74eams','/api/sync/plays/1?event=2','/api/sync/plays/https://evil.test','/api/sync/plays/1234567890123',`/api/homestream/games/${'-'.repeat(36)}`,`/api/homestream/games/${uuid}?url=https://evil.test`,'/api/duke','/media/a.m3u8','/api/sync/teams/','/api/sync/status/356/2026','/api/sync/status/150/2026?season=2025']) {
+    for (const target of ['/api/sync/teams?host=evil','/api/sync/teams?','/api/sync/%74eams','/api/sync/plays/1?event=2','/api/sync/plays/https://evil.test','/api/sync/plays/1234567890123',`/api/homestream/games/${'-'.repeat(36)}`,`/api/homestream/games/${uuid}?url=https://evil.test`,'/api/duke','/media/a.m3u8','/api/sync/teams/','/api/sync/status/356/2026','/api/sync/status/150/2026?season=2025','/api/broadcast/schedule/duke/','/api/broadcast/schedule/vt','/api/broadcast/schedule/miami','/api/broadcast/schedule/duke?x=1','/api/broadcast/schedule/%64uke','/api/broadcast/schedule','/api/broadcast/schedule/DUKE','/api/broadcast/next/duke']) {
       const response = await worker.fetch(makeRequest(target),{ALLOWED_ORIGINS:JSON.stringify([PRODUCTION_ORIGIN])},{});
       assert.equal(response.status,404,target);
     }
@@ -177,4 +182,44 @@ test('cached timing with unknown upstream age never becomes fresh on cache deliv
  assert.equal((await first.json()).ageMs,null);await Promise.all(pending);wall+=5000;
  const hit=await metadataGateway(makeRequest('/api/sync/plays/1'),{...options,fetcher:async()=>{throw Error('cache should avoid upstream');}});
  assert.equal(hit.status,200);assert.equal((await hit.json()).ageMs,null);
+});
+test('Duke broadcast schedule: one-minute sanitized cache, age added per delivery, unknown age kept, no stale fallback or leak',async()=>{
+  let now=1_800_000_000_000,calls=0,stored;const pending=[],records=[];
+  const cache={match:async()=>stored?.clone(),put:async(key,response)=>{assert.match(key.url,/__metadata_cache_v2\/api\/broadcast\/schedule\/duke$/);stored=response;}};
+  const options={cache,catalog,ctx:{waitUntil:p=>pending.push(p)},now:()=>now,diagnostic:record=>records.push(record),fetcher:async(url,init)=>{calls++;return fetcher(url,{...init,dated:new Date(now-2000).toUTCString()});}};
+  const response=await metadataGateway(makeRequest('/api/broadcast/schedule/duke',{headers:{Origin:PRODUCTION_ORIGIN}}),options);
+  const first=await response.json();assert.equal(response.headers.get('Access-Control-Allow-Origin'),PRODUCTION_ORIGIN);
+  assert.deepEqual([first.state,first.checkedAt,first.ageMs,calls],['upcoming',now,3000,2]);await Promise.all(pending);
+  const cachedText=await stored.clone().text();
+  for(const leaked of ['player.example','SECRET','signature','expires','media.example','previous.xml'])assert.ok(!cachedText.includes(leaked)&&!JSON.stringify(first).includes(leaked),leaked);
+  now+=59_999;
+  const hit=await (await metadataGateway(makeRequest('/api/broadcast/schedule/duke'),options)).json();
+  assert.deepEqual([hit.checkedAt,hit.ageMs,calls],[first.checkedAt,62_999,2],'a cache hit adds residence and makes no provider request');
+  now+=1;
+  assert.equal((await metadataGateway(makeRequest('/api/broadcast/schedule/duke'),{...options,fetcher:async()=>{throw Error(`failed ${LIVE_FEED}`);}})).status,502,'an expired entry is never a stale fallback');
+  stored=undefined;
+  const undated=await (await metadataGateway(makeRequest('/api/broadcast/schedule/duke'),{...options,fetcher})).json();await Promise.all(pending);now+=5000;
+  assert.equal(undated.ageMs,null);
+  assert.equal((await (await metadataGateway(makeRequest('/api/broadcast/schedule/duke'),{...options,fetcher:async()=>{throw Error('cache should avoid upstream');}})).json()).ageMs,null);
+  assert.equal((await metadataGateway(makeRequest('/api/broadcast/schedule/duke'),{fetcher})).status,502,'a missing private catalog is unavailable, never an empty listing');
+  assert.equal((await metadataGateway(makeRequest('/api/broadcast/schedule/duke',{signal:AbortSignal.timeout(5)}),{fetcher:()=>new Promise(()=>{}),catalog})).status,502,'caller abort covers the provider requests');
+  assert.ok(!JSON.stringify(records).includes('player.example')&&!JSON.stringify(records).includes('SECRET'));
+});
+test('Worker loads the private catalog for the exact Duke schedule route and reports only its family',async()=>{
+  const originalFetch=globalThis.fetch,originalWarn=console.warn,records=[];let reads=0;
+  globalThis.fetch=async()=>{throw Error(`private upstream ${LIVE_FEED}`);};
+  console.warn=line=>records.push(JSON.parse(line));
+  const env={ALLOWED_ORIGINS:JSON.stringify([PRODUCTION_ORIGIN]),STREAM_CATALOG:{get:async()=>{reads++;return JSON.stringify(catalog);}}};
+  try {
+    const response=await worker.fetch(makeRequest('/api/broadcast/schedule/duke'),env,{});
+    assert.equal(response.status,502);assert.ok(reads>=1);
+    assert.ok(records.length>0&&records.every(record=>record.event==='metadata-failure'&&record.route==='api/broadcast/schedule'));
+    const text=JSON.stringify(records)+await response.text();
+    for(const leaked of ['player.example','SECRET','signature','/duke'])assert.ok(!text.includes(leaked),leaked);
+    reads=0;assert.equal((await worker.fetch(makeRequest('/api/broadcast/schedule/vt'),env,{})).status,404);assert.equal(reads,0);
+  } finally { globalThis.fetch=originalFetch; console.warn=originalWarn; }
+});
+test('client metadata paths admit the broadcast namespace without widening other paths',()=>{
+  assert.equal(metadataURL('broadcast/schedule/duke','https://michaeltorbert.github.io/homecall/','https://gateway.example').href,'https://gateway.example/api/broadcast/schedule/duke');
+  for(const path of ['broadcast/schedule/duke?x=1','broadcast/../media','broadcasts/schedule/duke','media/live/x','broadcast/schedule/%64uke'])assert.throws(()=>metadataURL(path,'https://example.test/'),path);
 });

@@ -14,7 +14,7 @@ export function validateGatewayOrigin(value = '', { allowLocal = false, required
 }
 export function metadataURL(path, baseURI, origin = '', options = {}) {
   const gateway = validateGatewayOrigin(origin, options);
-  if (!/^(?:homestream|sync|catalog)\/[A-Za-z0-9/-]+$/.test(path)) throw Error('Invalid metadata path');
+  if (!/^(?:homestream|sync|catalog|broadcast)\/[A-Za-z0-9/-]+$/.test(path)) throw Error('Invalid metadata path');
   return gateway ? new URL(`/api/${path}`, gateway) : new URL(`api/${path}`, baseURI);
 }
 
