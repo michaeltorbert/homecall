@@ -4,23 +4,25 @@
 <header><a class="brand" href="./">Homecall</a>
 <div class="menu-wrap"><button id="more" class="icon-button" aria-label="More" aria-haspopup="menu" aria-expanded="false" aria-controls="menu"><span aria-hidden="true">•••</span></button>
 <div id="menu" role="menu" aria-label="More" hidden>
-<button id="nav-radio" role="menuitem" aria-current="true">Radio stations</button><button id="nav-broadcasts" role="menuitem" aria-current="false">Game broadcasts</button><hr>
+<button id="nav-radio" role="menuitem">Radio stations</button><button id="nav-broadcasts" role="menuitem">Game broadcasts</button><hr>
 <button id="menu-reconnect" role="menuitem">Reconnect audio</button><a id="official" role="menuitem" href="https://duke.leanplayer.com/" target="_blank" rel="noopener noreferrer">Open official player ↗</a><hr>
 <button id="menu-help" role="menuitem" data-dialog="help-dialog">Listening help</button><button id="menu-context" role="menuitem" data-dialog="context-dialog">Test context</button><button id="menu-logs" role="menuitem" data-dialog="logs-dialog">Session logs</button><button id="menu-tone" role="menuitem" data-dialog="tone-dialog">Test tone</button>
 </div></div></header>
 <nav class="main-nav" role="tablist" aria-label="Main"><button id="listen-tab" role="tab" aria-selected="true" aria-controls="live-panel">Listen</button><button id="archive-tab" role="tab" aria-selected="false" aria-controls="archive-panel" tabindex="-1">Recordings</button></nav>
 <div id="alerts"><p id="storage-warning" class="warning" role="status" data-warning-source="always"></p>
-<section id="owner-strip" class="owner-strip" aria-label="Radio player" hidden><div class="owner-line"><span class="dot" aria-hidden="true"></span><strong id="owner-name">Duke Sports Network</strong><span id="owner-state"></span></div><div class="owner-alert warning" data-warning-mirror="#notice"></div><div class="owner-actions"><button id="owner-return" class="text-button">Return to player</button><button id="owner-stop">Stop</button></div></section></div>
+<section id="owner-strip" class="owner-strip" aria-label="Listen player" hidden><div class="owner-line"><span class="dot" aria-hidden="true"></span><strong id="owner-name">Duke Sports Network</strong><span id="owner-state"></span></div><div class="owner-alert warning" data-warning-mirror="#notice"></div><div class="owner-actions"><button id="owner-return" class="text-button">Return to player</button><button id="owner-stop">Stop</button></div></section></div>
 <main>
 <section id="live-panel" role="tabpanel" aria-labelledby="listen-tab" class="view">
 <div class="selectors"><div class="field"><label for="team">Team</label><select id="team"><option value="duke">Duke</option><option value="miami">Miami</option><option value="vt">Virginia Tech</option><option value="gt">Georgia Tech</option></select></div>
 <div id="feed-picker" class="field" hidden><label for="feed">Source</label><select id="feed" aria-describedby="feed-help"></select></div></div>
-<p id="feed-help" class="visually-hidden">Changing the source stops playback. Press Play to start the new source at 0 seconds, then check alignment.</p>
-<section id="game-panel" class="game-row" hidden><div class="field"><label for="game">Game</label><select id="game" disabled></select></div><div class="field-meta"><p id="game-note" role="status"></p><button id="game-refresh" class="text-button">Refresh games</button></div></section>
+<p id="feed-help" class="visually-hidden">Automatic plays the game feed when it is published, then the network and its backups, and switches on its own if a feed fails. Choosing a specific source stops playback; press Play to start it at 0 seconds, then check alignment.</p>
+<section id="game-panel" class="game-row" hidden><div class="field"><label for="game">Game</label><select id="game" disabled aria-describedby="game-status-help"></select></div><p id="game-status-help" class="visually-hidden">LIVE, Upcoming and Completed are reported by the sports-data source and can lag the actual game. They do not mean a feed is published or playable.</p><div class="field-meta"><p id="game-note" role="status"></p><button id="game-refresh" class="text-button">Refresh games</button></div></section>
 <h1 id="station">Duke Sports Network</h1>
 <div class="status"><span class="dot" aria-hidden="true"></span><span id="status" role="status">Stopped</span></div>
+<p id="source-current" class="source-current"></p>
+<p id="switch-notice" class="switch-notice" role="status" aria-live="polite" hidden></p>
 <p id="notice" class="notice" role="status" aria-live="polite" data-warning-source="flagged"></p>
-<div id="recovery-actions" class="actions" hidden><button id="recover-reconnect" class="primary">Reconnect</button><a id="recover-official" class="button-link" href="https://duke.leanplayer.com/" target="_blank" rel="noopener noreferrer">Official player ↗</a></div>
+<div id="recovery-actions" class="actions" hidden><button id="recover-reconnect" class="primary">Reconnect</button><a id="recover-official" class="button-link" href="https://duke.leanplayer.com/" target="_blank" rel="noopener noreferrer">Official player ↗</a><p id="recover-note" class="hint" hidden></p></div>
 <div class="transport"><button id="connect" class="primary">Play</button><button id="pause" class="primary" disabled hidden>Pause</button><button id="stop" disabled>Stop</button></div>
 <div id="resume-position-row" class="resume-row"><button id="resume-position" hidden>Resume at paused position</button><p class="hint">Use this if you paused the TV too.</p></div>
 <div class="volume"><label for="volume" class="volume-icon"><span aria-hidden="true">◖))</span><span class="visually-hidden">Volume</span></label><input id="volume" type="range" min="0" max="1" step="0.01" value="0.8"><output id="volume-value" for="volume">80%</output></div>
@@ -36,30 +38,17 @@
 <div role="group" aria-labelledby="more-delay"><h3 id="more-delay">More delay</h3><div class="nudge-row"><button data-nudge="0.25" disabled aria-label="Add a quarter second delay">¼ s</button><button data-nudge="1" disabled aria-label="Add 1 second delay">1 s</button><button data-nudge="5" disabled aria-label="Add 5 seconds delay">5 s</button></div></div></div>
 <div class="matching-footer"><button id="confirm" disabled>Sounds aligned</button><button id="live" class="quiet" disabled>Incoming audio</button></div>
 <p id="alignment" class="visually-hidden">Not yet aligned</p>
-</div>
-<details class="disclosure"><summary>Timing details &amp; help</summary><div><dl><dt>Applied delay</dt><dd><output id="delay">0.00</output> s</dd><dt>History limit</dt><dd>180 seconds</dd></dl><p class="hint">Call late? Use less delay. At 0 seconds, pause your TV until the call catches up. Call early? Add delay or pause to match.</p><p class="hint">The delay is what this app adds, not time since the play. Check again after breaks, buffering or phone interruptions.</p></div></details>
-</section>
-</section>
-<section id="sync-panel" role="tabpanel" aria-labelledby="listen-tab" class="view" hidden>
-<p class="eyebrow">Game broadcasts</p>
-<div class="field"><label for="sync-team">School</label><select id="sync-team" disabled></select></div><div class="field-meta"><p id="sync-team-note" role="status"></p><button id="sync-teams-retry" class="text-button">Reload schools</button></div>
-<section id="sync-game-panel" class="game-row" hidden><div class="field"><label for="sync-game">Game</label><select id="sync-game" disabled aria-describedby="sync-game-status-help"></select></div><p id="sync-game-status-help" class="hint">LIVE, Upcoming and Completed are reported by the sports-data source and can lag the actual game. They do not mean a feed is published or playable.</p><div class="field-meta"><p id="sync-game-note" role="status"></p><button id="sync-game-refresh" class="text-button">Refresh games</button></div></section>
-<h1 id="sync-title">Choose a game</h1>
-<div class="status"><span class="dot" aria-hidden="true"></span><span id="sync-playback" role="status" data-warning-source="flagged">Stopped.</span></div>
-<div class="transport"><button id="sync-play" class="primary" disabled>Play</button><button id="sync-stop" disabled>Stop</button></div>
-<audio id="sync-audio" controls preload="none"></audio>
-<button id="sync-match-toggle" class="match-entry" data-disclose="sync-matching" aria-expanded="false" aria-controls="sync-matching">Match my TV</button>
-<section id="sync-matching" class="matching" aria-labelledby="sync-matching-title" hidden>
-<div class="section-head"><h2 id="sync-matching-title" tabindex="-1">Match my TV</h2><button id="sync-match-close" class="quiet" data-dismiss="sync-matching" aria-label="Close Match my TV">Close ×</button></div>
+<section id="timing-tools" class="timing-tools" aria-labelledby="timing-title" hidden>
+<h3 id="timing-title">Find a play by TV clock</h3>
 <div class="sync-source"><label for="sync-timing-source">Game timing</label><select id="sync-timing-source"><option value="">Choose a timing source</option><option value="browser">ESPN recorded plays · confirm before seeking</option><option value="gateway">Homecall service · estimated plays</option></select>
 <p id="sync-mapping-note" class="hint" role="status"></p><button id="sync-timing-retry" type="button" class="text-button" hidden>Retry game timing</button></div>
 <form id="sync-clock-form" class="sync-clock-form"><fieldset id="sync-clock-fields"><legend class="visually-hidden">TV game clock</legend><div class="clock-row"><div class="field"><label for="sync-quarter">Quarter</label><select id="sync-quarter"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select></div><div class="field"><label for="sync-clock">TV clock</label><input id="sync-clock" inputmode="numeric" placeholder="7:29" autocomplete="off"></div></div></fieldset><button id="sync-apply" class="primary" disabled>Find play</button></form>
 <p id="sync-result" role="status"></p><div id="sync-matches" class="sync-matches"></div>
-<div class="adjustments"><div role="group" aria-labelledby="sync-back"><h3 id="sync-back">Back · more delay</h3><div class="nudge-row"><button data-sync-nudge="-1" disabled aria-label="Move audio back 1 second">1 s</button><button data-sync-nudge="-0.25" disabled aria-label="Move audio back a quarter second">¼ s</button></div></div>
-<div role="group" aria-labelledby="sync-ahead"><h3 id="sync-ahead">Ahead · less delay</h3><div class="nudge-row"><button data-sync-nudge="0.25" disabled aria-label="Move audio ahead a quarter second">¼ s</button><button data-sync-nudge="1" disabled aria-label="Move audio ahead 1 second">1 s</button></div></div></div>
-<button id="sync-incoming" class="text-button" disabled>Incoming audio</button>
 <details class="disclosure sync-adjust"><summary>Recorded-play timing adjustment</summary><div><label for="sync-offset">Timestamp offset · seconds</label><input id="sync-offset" type="number" value="0" step="0.25"><p class="hint">Positive values seek later than the reported play timestamp. Adjust only after comparing a distinct play with the commentary. This does not calibrate automatic synchronization.</p></div></details>
-<details class="disclosure"><summary>Timing details &amp; help</summary><div><dl class="sync-times"><dt>Last recorded play here</dt><dd id="sync-mapped">No matching play anchor</dd><dt>Audio real time</dt><dd id="sync-audio-time">Start audio to see its timestamp</dd><dt>Current time</dt><dd id="sync-now">—</dd><dt>Recorded plays in the audio window</dt><dd id="sync-range">Start playback to see the range</dd></dl><p id="sync-range-note" class="hint"></p></div></details>
+<details class="disclosure"><summary>Game timing details</summary><div><dl class="sync-times"><dt>Last recorded play here</dt><dd id="sync-mapped">No matching play anchor</dd><dt>Audio real time</dt><dd id="sync-audio-time">Start a game feed to see its timestamp</dd><dt>Current time</dt><dd id="sync-now">—</dd><dt>Recorded plays in the audio window</dt><dd id="sync-range">Start playback to see the range</dd></dl><p id="sync-range-note" class="hint"></p><p class="hint">Audio real time is estimated from the delayed audio you hear; phone and speaker output latency is not measured.</p></div></details>
+</section>
+</div>
+<details class="disclosure"><summary>Timing details &amp; help</summary><div><dl><dt>Applied delay</dt><dd><output id="delay">0.00</output> s</dd><dt>History limit</dt><dd>180 seconds</dd></dl><p class="hint">Call late? Use less delay. At 0 seconds, pause your TV until the call catches up. Call early? Add delay or pause to match.</p><p class="hint">The delay is what this app adds, not time since the play. Check again after breaks, buffering or phone interruptions.</p></div></details>
 </section>
 </section>
 <section id="archive-panel" role="tabpanel" aria-labelledby="archive-tab" class="view" hidden>
@@ -81,7 +70,7 @@
 </div>
 <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text"><div class="dialog-head"><h2 id="confirm-title">Continue?</h2></div><div class="dialog-warnings warning" data-warning-mirror></div><p id="confirm-text"></p><div class="actions"><button id="confirm-cancel" autofocus>Cancel</button><button id="confirm-continue" class="primary">Continue</button></div></dialog>
 <dialog id="help-dialog" aria-labelledby="help-title"><div class="dialog-head"><h2 id="help-title">Listening help</h2><button class="quiet close-button" data-close-dialog aria-label="Close">×</button></div><div class="dialog-warnings warning" data-warning-mirror></div>
-<h3>Radio stations</h3><p id="source-note">Live network channel. Game coverage depends on the broadcaster.</p><p>Call ahead of the TV? Open Match my TV, pause to match, then resume when the picture catches up.</p><p>Call behind the TV? Reduce added delay. At 0 seconds, pause your TV until the audio catches up. Reducing delay skips audio forward; adding delay repeats earlier audio.</p><p>After commercials, buffering or a phone interruption, check alignment again. Background and locked-screen playback are not yet verified.</p></dialog>
+<h3>Listening</h3><p>Choose a team and, when one is listed, a game. Automatic plays the published game feed first, then the team’s network, its backup connection and affiliate stations. If a feed fails, Homecall moves to the next one, says so, and starts it at 0 seconds; check alignment with your TV after any switch. Source lets you pick one yourself, for example when a station carries the wrong program.</p><p id="source-note">Live network channel. Game coverage depends on the broadcaster.</p><p>Call ahead of the TV? Open Match my TV, pause to match, then resume when the picture catches up.</p><p>Call behind the TV? Reduce added delay. At 0 seconds, pause your TV until the audio catches up. Reducing delay skips audio forward; adding delay repeats earlier audio.</p><p>After commercials, buffering or a phone interruption, check alignment again. Background and locked-screen playback are not yet verified.</p></dialog>
 <dialog id="context-dialog" aria-labelledby="context-title"><div class="dialog-head"><h2 id="context-title">Test context</h2><button class="quiet close-button" data-close-dialog aria-label="Close">×</button></div><div class="dialog-warnings warning" data-warning-mirror></div>
 <p>Optional. Choose TV service and output before starting a listening session.</p>
 <div class="field"><label for="provider">TV service</label><select id="provider"><option value="unspecified">Not specified</option><option value="youtube-tv">YouTube TV</option><option value="cable">Cable / satellite</option><option value="antenna">Antenna</option><option value="other">Other</option></select></div>
@@ -89,7 +78,7 @@
 <div class="field"><label for="reason">Next adjustment reason</label><select id="reason"><option value="unspecified">Not specified</option><option value="initial">Initial sync</option><option value="commercial">After commercials</option><option value="drift">Seems to have drifted</option><option value="interruption">Playback interruption</option></select></div>
 <p id="context-lock" hidden>TV service and output are locked during this session.</p></dialog>
 <dialog id="logs-dialog" aria-labelledby="logs-title"><div class="dialog-head"><h2 id="logs-title">Session logs</h2><button class="quiet close-button" data-close-dialog aria-label="Close">×</button></div><div class="dialog-warnings warning" data-warning-mirror></div>
-<p>Radio and test-tone timing adjustments, not audio. Logs stay in this browser until you share, copy or download them.</p>
+<p>Listening and test-tone timing adjustments, not audio. Logs stay in this browser until you share, copy or download them.</p>
 <div class="field"><label for="sessions">Session</label><select id="sessions"><option value="">No sessions yet</option></select></div>
 <button id="preview" class="primary">Preview / refresh</button><p id="log-summary" class="hint"></p>
 <textarea id="export" rows="7" readonly aria-label="Complete log to copy" placeholder="Your log preview will appear here."></textarea>
@@ -97,5 +86,5 @@
 <p id="share-status" class="hint" role="status">Choose Mail or Messages in your phone’s share menu, or paste a copied log into an email.</p>
 <details class="disclosure"><summary>Remove saved logs</summary><div><p class="hint">Stop playback first. Removing logs cannot be undone.</p><button id="clear" class="danger">Remove all saved logs</button><button id="clear-confirm" class="danger" hidden>Yes, remove all logs</button></div></details></dialog>
 <dialog id="tone-dialog" aria-labelledby="tone-title"><div class="dialog-head"><h2 id="tone-title">Test tone</h2><button class="quiet close-button" data-close-dialog aria-label="Close">×</button></div><div class="dialog-warnings warning" data-warning-mirror></div>
-<p>A tone each second, higher every fifth, plays in the radio player so you can try pause, delay and matching. Any current audio stops.</p><div class="actions"><button data-close-dialog>Cancel</button><button id="demo" class="primary">Start test tone</button></div></dialog>
+<p>A tone each second, higher every fifth, plays in the Listen player so you can try pause, delay and matching. Any current audio stops.</p><div class="actions"><button data-close-dialog>Cancel</button><button id="demo" class="primary">Start test tone</button></div></dialog>
 <script type="module" src="./src/app.js"></script></body></html>

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Original Homecall Now Playing artwork for the Georgia Tech selection (issue #19). The
+       Homecall house-and-call mark from homecall-512.svg, reduced, over the plain full school name
+       "GEORGIA / TECH" drawn as original monoline geometric strokes (no text element, font,
+       monogram, logo, mascot or official lettering). Color is Homecall's own Georgia Tech accent
+       from src/teams.js. Primitives only: no raster images, external references or filters.
+       Opaque. No score. See PROVENANCE.md. -->
+  <rect width="512" height="512" fill="#10151e"/>
+  <rect x="56" y="56" width="400" height="400" rx="72" fill="#18202d"/>
+  <g transform="translate(256 158) scale(0.46) translate(-256 -260)">
+    <path d="M120 256 L256 136 L392 256" fill="none" stroke="#ecf0f7" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M156 236 V384 H356 V236" fill="none" stroke="#ecf0f7" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="220" cy="304" r="20" fill="#d9bc7a"/>
+    <path d="M251.1 272.9 A44 44 0 0 1 251.1 335.1" fill="none" stroke="#d9bc7a" stroke-width="18" stroke-linecap="round"/>
+    <path d="M269.5 254.5 A70 70 0 0 1 269.5 353.5" fill="none" stroke="#d9bc7a" stroke-width="18" stroke-linecap="round"/>
+  </g>
+  <!-- GEORGIA / TECH: cap height 60 px (100 units at scale 0.6), stroke 16 units. -->
+  <g fill="none" stroke="#d9bc7a" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="translate(99.4 248) scale(0.6)">
+      <path d="M52.57 11.7 A32 50 0 1 0 64 50 H38"/>
+      <path transform="translate(90 0)" d="M50 0 H0 V100 H50 M0 50 H42"/>
+      <path transform="translate(166 0)" d="M35 0 A35 50 0 1 0 35 100 A35 50 0 1 0 35 0 Z"/>
+      <path transform="translate(262 0)" d="M0 100 V0 H28 A23 25 0 0 1 28 50 H0 M26 50 L54 100"/>
+      <path transform="translate(342 0)" d="M52.57 11.7 A32 50 0 1 0 64 50 H38"/>
+      <path transform="translate(432 0)" d="M0 0 V100"/>
+      <path transform="translate(458 0)" d="M0 100 L32 0 L64 100 M12.8 60 H51.2"/>
+    </g>
+    <g transform="translate(169 332) scale(0.6)">
+      <path d="M0 0 H56 M28 0 V100"/>
+      <path transform="translate(82 0)" d="M50 0 H0 V100 H50 M0 50 H42"/>
+      <path transform="translate(158 0)" d="M49.28 11.7 A30 50 0 1 0 49.28 88.3"/>
+      <path transform="translate(234 0)" d="M0 0 V100 M56 0 V100 M0 50 H56"/>
+    </g>
+  </g>
+</svg>

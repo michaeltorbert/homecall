@@ -24,6 +24,15 @@ export class ManualEngine {
     const h = this.history;
     if (type === 'restore' && Number.isFinite(value) && value >= 0 && value <= h.capacity / h.sampleRate) {
       this.userPaused = false; this.hold = null; this.restoring = Math.max(0, value - this.gapOffset); h.paused = true;
+    } else if (type === 'flush') {
+      // Media-position discontinuity: discard every readable sample and stop input until the caller
+      // confirms the new position. Cumulative received/rendered counters keep their coordinate.
+      if (this.hold) result = 'holding';
+      else {
+        this.history = new AudioHistory(h.sampleRate, h.capacity / h.sampleRate);
+        this.ingesting = false; this.restoring = null; this.recoveryDelay = null; this.gapOffset = 0;
+        this.userPaused = false; this.positionLost = true; this.overrunReported = false;
+      }
     } else if (this.restoring !== null && !['live', 'ingest', 'interrupt', 'invalidate', 'snapshot'].includes(type)) result = 'restoring';
     else if (this.hold && ['nudge', 'delay', 'live', 'pause', 'hold'].includes(type)) result = 'holding';
     else if (type === 'nudge' && Number.isFinite(value)) {

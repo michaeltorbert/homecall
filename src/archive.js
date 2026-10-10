@@ -2,7 +2,7 @@ import { metadataURL, configuredGatewayOrigin, gatewayOptions } from './gateway.
 import { teams } from './teams.js';
 import { catalogFreshness, filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
 import { createConfirm } from './ui-shell.js';
-export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowPlaying = null, liveActive = () => false, confirm = createConfirm(document), origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal, now = () => Date.now(), every = fn => document.defaultView?.setInterval(fn, 60_000) }) {
+export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null, liveActive = () => false, confirm = createConfirm(document), origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal, now = () => Date.now(), every = fn => document.defaultView?.setInterval(fn, 60_000) }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
   let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
@@ -30,38 +30,39 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowP
     savePosition(); replayKey = null; restorePosition = null; ++playRequest; stopReplay(audio); current = null; $('replay-player').hidden = true;
     owner?.release(); owner = null;
   }
-  // Two destinations: Listen (radio or game broadcasts, whichever was chosen last) and Recordings.
-  // More → Radio stations / Game broadcasts choose the Listen view. Browsing never stops radio;
-  // leaving an active broadcast or a loaded recording stops it, so that departure asks first.
-  let listenMode = 'live';
+  // Two destinations: Listen (every team, game and source) and Recordings. More → Radio stations and
+  // Game broadcasts are aliases that open Listen at its team or game choice. Browsing never stops Listen
+  // audio; leaving a loaded recording stops it, so that departure asks first.
   const tabs = ['listen', 'archive'], tabOf = name => (name === 'archive' ? 'archive' : 'listen');
-  function selectMode(next, { force = false } = {}) {
-    if (next === 'sync' && !sync) next = 'live';
-    if (next === mode) return;
-    const leavingBroadcast = mode === 'sync' && sync?.active, leavingRecording = mode === 'archive' && !!current;
-    if (!force && (leavingBroadcast || leavingRecording)) {
-      confirm.ask(leavingBroadcast ? { title: 'Stop this broadcast?', text: 'The game broadcast stops when you leave it. Radio does not start on its own.', action: 'Stop and leave' }
-        : { title: 'Stop this recording?', text: 'The recording stops when you leave it. Your position is saved.', action: 'Stop and leave' },
-        () => { selectMode(next, { force: true }); $(`${tabOf(mode)}-tab`).focus(); });
+  function selectMode(next, { force = false, focus = null } = {}) {
+    if (next !== 'archive') next = 'live';
+    if (next === mode) { focusField(focus); return; }
+    const leavingRecording = mode === 'archive' && !!current;
+    if (!force && leavingRecording) {
+      confirm.ask({ title: 'Stop this recording?', text: 'The recording stops when you leave it. Your position is saved.', action: 'Stop and leave' },
+        () => { selectMode(next, { force: true }); if (focus) focusField(focus); else $(`${tabOf(mode)}-tab`).focus(); });
       return;
     }
     mode = next;
-    if (mode !== 'archive') listenMode = mode;
-    stop(); sync?.deactivate();
+    stop();
     for (const name of tabs) {
       $(`${name}-tab`).setAttribute('aria-selected', String(name === tabOf(mode)));
       $(`${name}-tab`).tabIndex = name === tabOf(mode) ? 0 : -1;
     }
-    $('listen-tab').setAttribute('aria-controls', `${listenMode}-panel`);
-    $('nav-radio')?.setAttribute('aria-current', String(mode === 'live'));
-    $('nav-broadcasts')?.setAttribute('aria-current', String(mode === 'sync'));
+    $('listen-tab').setAttribute('aria-controls', 'live-panel');
     document.body.dataset.view = mode;
     $('live-panel').hidden = mode !== 'live';
     $('archive-panel').hidden = mode !== 'archive';
-    if (sync) { $('sync-panel').hidden = mode !== 'sync'; if (mode === 'sync') sync.activate(); }
     if (mode === 'archive') { $('archive-team').value = [...$('archive-team').options].some(o => o.value === selectedTeam()) ? selectedTeam() : 'duke'; render(true); }
+    focusField(focus);
   }
-  const choose = name => (name === 'archive' ? 'archive' : listenMode);
+  // Game broadcasts focuses the Listen game choice when one is shown, otherwise the team choice.
+  function focusField(name) {
+    if (!name) return;
+    const game = $('game');
+    (name === 'game' && game && !game.closest('[hidden]') ? game : $('team'))?.focus();
+  }
+  const choose = name => (name === 'archive' ? 'archive' : 'live');
   for (const name of tabs) {
     $(`${name}-tab`).onclick = () => selectMode(choose(name));
     $(`${name}-tab`).onkeydown = event => {
@@ -73,10 +74,9 @@ export function setupArchive({ stopLive, selectedTeam, memory, sync = null, nowP
       if (!confirm.pending) $(`${tabOf(mode)}-tab`).focus();
     };
   }
-  if ($('nav-radio')) $('nav-radio').onclick = () => selectMode('live');
-  if ($('nav-broadcasts')) $('nav-broadcasts').onclick = () => selectMode('sync');
+  if ($('nav-radio')) $('nav-radio').onclick = () => selectMode('live', { focus: 'team' });
+  if ($('nav-broadcasts')) $('nav-broadcasts').onclick = () => selectMode('live', { focus: 'game' });
   if ($('owner-return')) $('owner-return').onclick = () => selectMode('live');
-  $('nav-broadcasts')?.toggleAttribute('hidden', !sync);
   function options(id, values, label) {
     const previous = $(id).value;
     $(id).replaceChildren(new Option(label, ''), ...values.map(value => new Option(value, value)));

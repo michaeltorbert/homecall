@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import * as timeline from '../src/hls-timeline.js';
 function harness(native=false,timing={}){
  const instances=[],events=[],recoveries=[],hooks={},clock={now:0};const audio={currentTime:10,seekable:{length:1,start:()=>0,end:()=>40},play:()=>Promise.resolve(),pause(){},removeAttribute(){},load(){},canPlayType:()=> 'maybe'};
  class Hls {static isSupported(){return !native}static Events={ERROR:'error',LEVEL_UPDATED:'levelUpdated',FRAG_BUFFERED:'fragBuffered'};constructor(){instances.push(this);this.handlers={};this.playingDate=new Date(100000);this.latestLevelDetails={fragments:[{start:15}],edge:35}}on(e,f){(this.handlers[e]||=[]).push(f);if(e==='error')this.error=f}emit(e,data={}){for(const f of this.handlers[e]||[])f(e,data)}loadSource(u){this.url=u}attachMedia(a){this.audio=a}destroy(){this.destroyed=true}}
- const context=vm.createContext({Hls,setTimeout:timing.setTimeout||setTimeout,clearTimeout:timing.clearTimeout||clearTimeout});vm.runInContext(fs.readFileSync(new URL('../src/sync-player.js',import.meta.url),'utf8').replace(/^import .*;\n/,'').replace('export class','class')+';globalThis.SyncPlayer=SyncPlayer;',context);
+ const context=vm.createContext({Hls,...timeline,NOTICE:timeline.TIMELINE_NOTICE,setTimeout:timing.setTimeout||setTimeout,clearTimeout:timing.clearTimeout||clearTimeout});vm.runInContext(fs.readFileSync(new URL('../src/sync-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class','class')+';globalThis.SyncPlayer=SyncPlayer;',context);
  const player=new context.SyncPlayer(audio,s=>events.push(s),{onRecovery:e=>{recoveries.push(e);hooks.recovery?.(e);},now:()=>clock.now});return{player,audio,instances,events,recoveries,hooks,clock};
 }
 test('Sync bounds restrict seeks to the current playlist; stop unloads media and ignores old callbacks',()=>{

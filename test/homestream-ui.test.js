@@ -71,6 +71,16 @@ test('catalog refresh, failure and disabling invalidate labels; replaced options
  h.ui.setEnabled(false);assert.equal(invalidations,enabled+3);
 });
 
+test('an explicit catalog ID wins over names, status reports checking before readiness, and onChange says why',async t=>{
+ const kinds=[];let finish;const h=harness(t,{read:async url=>url.pathname.endsWith('/teams')?[{id:'other-id',name:'Georgia Tech'},{id:'team-id',name:'Renamed school'}]:games,
+  probe:()=>new Promise(r=>finish=r),hooks:{teamId:()=> 'team-id',onChange:kind=>kinds.push(kind)}});
+ assert.equal(h.ui.status,'idle');h.ui.setEnabled(true);assert.equal(h.ui.status,'loading');await tick();
+ assert.equal(h.ui.status,'checking');assert.equal(h.ui.ready,null);finish('ready');await tick();
+ assert.equal(h.ui.status,'ready');assert.equal(h.ui.ready.id,'now');assert.match(h.ui.ready.url,/\/team-id\/now$/);
+ h.$('game').value='future';await h.$('game').onchange();assert.equal(h.ui.status,'unavailable');assert.deepEqual(kinds,['refresh','game']);
+ const missing=harness(t,{read:async url=>url.pathname.endsWith('/teams')?[{id:'other-id',name:'Georgia Tech'}]:games,probe:async()=> 'ready',hooks:{teamId:()=> 'team-id'}});
+ missing.ui.setEnabled(true);await tick();assert.equal(missing.ui.status,'unavailable');assert.match(missing.$('game-note').textContent,/No Georgia Tech game feeds are listed/);
+});
 test('cross-origin and mismatched game media never reach the probe or Play readiness', async t => {
  for (const url of ['https://upstream.example/live.m3u8','https://gateway.example/media/game/team-id/other','https://gateway.example/media/game/team-id/now?target=private']) {
   let probes=0;

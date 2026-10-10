@@ -2,15 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import * as timeline from '../src/hls-timeline.js';
 function deferred() { let resolve,reject; const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject}; }
+// Pure engine fixture: fake context, element, worklet port and HLS transport. No real audio, PCM or
+// network; browser media proof lives in the external diagnostic. timing.media adds a seekable window,
+// an element whose currentTime assignment starts a seek, and playlist details from timing.details().
 function harness(timing = {}) {
-  const contexts=[],audios=[],nodes=[],events=[],states=[],transports=[],mp3s=[];
+  const contexts=[],audios=[],nodes=[],events=[],details=[],states=[],transports=[],mp3s=[];
   class Context {
-    constructor(){this.state='running';this.module=deferred();this.audioWorklet={addModule:()=>this.module.promise};contexts.push(this);}
+    constructor(){if(timing.contextError)throw timing.contextError;this.state='running';this.module=deferred();this.audioWorklet={addModule:()=>this.module.promise};contexts.push(this);}
     resume(){this.state='running';return Promise.resolve();}
     close(){this.closed=true;return Promise.resolve();}
-    createMediaElementSource(){return {connect(){}};}
-    createGain(){const g={gain:{value:0},connect(to){g.to=to;},disconnect(){g.disconnected=true;}};return g;}
+    createMediaElementSource(){if(timing.sourceError)throw timing.sourceError;return {connect(){if(timing.sourceConnectError)throw timing.sourceConnectError;}};}
+    createGain(){if(timing.gainError)throw timing.gainError;const g={gain:{value:0},connect(to){g.to=to;},disconnect(){g.disconnected=true;}};return g;}
   }
   class Mp3Transport {
     constructor(context,output,url,onEvent){Object.assign(this,{context,output,url,onEvent,position:0});this.gate=deferred();this.ready=this.gate.promise;this.ready.catch(()=>{});mp3s.push(this);}
@@ -18,30 +22,34 @@ function harness(timing = {}) {
     stop(){this.stopped=true;this.gate.reject(Error('aborted'));}
   }
   class Audio {
-    constructor(){this.played=deferred();this.readyState=4;audios.push(this);}
+    constructor(){this.played=deferred();this.readyState=4;audios.push(this);
+      if(timing.media){let time=timing.media.start??0;this.paused=false;this.seekable={length:1,start:()=>timing.media.range[0],end:()=>timing.media.range[1]};
+        Object.defineProperty(this,'currentTime',{get:()=>time,set:value=>{time=value;this.seeking=true;this.assigned=(this.assigned||[]).concat(value);},configurable:true});
+        this.at=value=>{time=value;};}}
     play(){return this.played.promise;}
     pause(){this.paused=true;}
     removeAttribute(){} load(){}
   }
   class Node {
-    constructor(){this.messages=[];this.port={postMessage:data=>this.messages.push(data)};nodes.push(this);}
-    connect(){}
-    ack(index=0){const m=this.messages[index];this.port.onmessage({data:{type:'ack',...m,action:m.type,type:'ack',result:'applied',after:{delay:0,paused:false},contextSeconds:1}});}
+    constructor(){if(timing.nodeError)throw timing.nodeError;this.messages=[];this.port={postMessage:data=>this.messages.push(data)};nodes.push(this);}
+    connect(){if(timing.graphError)throw timing.graphError;}
+    ack(index=0,after={delay:0,paused:false}){const m=this.messages[index];this.port.onmessage({data:{type:'ack',...m,action:m.type,type:'ack',result:'applied',after,contextSeconds:1}});}
+    state(data){this.port.onmessage({data:{type:'state',event:null,paused:false,holding:false,restoring:null,ingesting:true,...data}});}
   }
   class Hls {
-    static Events={ERROR:'error'};
+    static Events={ERROR:'error',LEVEL_UPDATED:'levelUpdated',FRAG_BUFFERED:'fragBuffered'};
     static isSupported(){return !!timing.hls;}
-    constructor(){this.handlers={};transports.push(this);}
+    constructor(options){this.options=options;this.handlers={};this.latestLevelDetails=timing.details?.();transports.push(this);}
     on(type,fn){this.handlers[type]=fn;}
     loadSource(url){this.url=url;}
     attachMedia(audio){this.audio=audio;}
     destroy(){this.destroyed=true;}
   }
-  const sandbox=vm.createContext({Hls,Mp3Transport,navigator:timing.navigator,window:{AudioContext:Context,AudioWorkletNode:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout:timing.setTimeout || setTimeout,clearTimeout:timing.clearTimeout || clearTimeout});
+  const sandbox=vm.createContext({...timeline,Hls,Mp3Transport,navigator:timing.navigator,window:{AudioContext:Context,AudioWorkletNode:timing.noWorklet?undefined:Node,isSecureContext:true},Audio,AudioWorkletNode:Node,workletURL:'fixture',setTimeout:timing.setTimeout || setTimeout,clearTimeout:timing.clearTimeout || clearTimeout});
   const source=fs.readFileSync(new URL('../src/player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class Player','class Player');
   vm.runInContext(source+'\nglobalThis.Player = Player;',sandbox);
-  const player=new sandbox.Player(s=>states.push(s),e=>events.push(e));
-  return{player,contexts,audios,nodes,events,states,transports,mp3s};
+  const player=new sandbox.Player(s=>states.push(s),(e,detail)=>{events.push(e);details.push(detail);});
+  return{player,contexts,audios,nodes,events,details,states,transports,mp3s};
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function connect(h){const started=h.player.start('https://fixture/stream');const a=h.audios.at(-1);a.onplaying();a.played.resolve();h.contexts.at(-1).module.resolve();await tick();h.nodes.at(-1).ack();await started;}
@@ -257,6 +265,183 @@ test('MP3 EOF reconnects through a fresh decoder transport with the saved delay,
  const n=h.nodes[1];assert.equal(n.messages[0].type,'restore');assert.equal(n.messages[0].value,20);n.ack(0);await tick();n.ack(1);await retry;
  assert.equal(h.mp3s[1].playing,true);assert.equal(h.events.at(-1),'source-reconnected');h.player.stop();
 });
+// ---------- Unified Listen engine contracts (pure fixture; no real audio or HLS) ----------
+const BASE=Date.UTC(2026,9,10,19,0,0);
+const playlist=(count=40)=>({fragments:Array.from({length:count},(_,i)=>({sn:i+1,cc:0,start:i*6,duration:6,programDateTime:BASE+i*6000})),edge:count*6});
+const engine=(r,extra={})=>({delay:0,available:r,paused:false,holding:false,restoring:null,ingesting:true,receivedSeconds:r,renderedSeconds:r,...extra});
+const media=(extra={})=>({hls:true,media:{range:[0,240],start:100},details:()=>playlist(),...extra});
+async function connectHls(h,url='https://gateway.example/media/game/team/one'){
+ const started=h.player.start(url,0,{hls:true});const a=h.audios.at(-1);a.onplaying();a.played.resolve();h.contexts.at(-1).module.resolve();await tick();
+ const n=h.nodes.at(-1);n.ack(n.messages.length-1,engine(0));await started;return{a,n};
+}
+// One worklet state message while the element plays media position r + offset.
+const play=(n,a,r,{offset=100,...extra}={})=>{a.at(r+offset);n.state(engine(r,extra));};
+const last=n=>n.messages.length-1;
+
+test('output-ready requires connected input and rendered PCM progression, not media playing or setup completion',async()=>{
+ const h=harness();const started=h.player.start('https://fixture/stream');const a=h.audios[0];a.onplaying();a.played.resolve();h.contexts[0].module.resolve();await tick();
+ const n=h.nodes[0];n.state(engine(1));assert.equal(h.events.includes('output-ready'),false,'output before input is admitted does not count');
+ n.ack(0,engine(1));await started;
+ assert.ok(h.events.includes('source-playing'));assert.equal(h.events.includes('output-ready'),false,'media playing and setup completion are not output');
+ n.state(engine(1.02));assert.equal(h.events.includes('output-ready'),false,'no meaningful PCM progression yet');
+ n.state(engine(2,{paused:true}));n.state(engine(2.5,{holding:true}));n.state(engine(3,{restoring:20}));
+ assert.equal(h.events.includes('output-ready'),false,'paused, held or restoring output is not eligible');
+ n.state(engine(3.5));assert.equal(h.events.filter(e=>e==='output-ready').length,1);
+ n.state(engine(4));assert.equal(h.events.filter(e=>e==='output-ready').length,1,'once per physical attempt');h.player.stop();
+});
+test('startup failures carry an owner-facing kind: permission, transport, local and environment',async()=>{
+ const kind=promise=>promise.then(()=>null,error=>error.kind);
+ const denied=harness();let started=denied.player.start('https://fixture/a');const error=Error('gesture');error.name='NotAllowedError';
+ denied.audios[0].played.reject(error);denied.contexts[0].module.resolve();assert.equal(await kind(started),'permission');
+ for(const [state,expected] of [['suspended','permission'],['running','transport']]){
+  const timers=[];const h=harness({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});
+  started=h.player.start('https://fixture/a');h.contexts[0].state=state;timers.find(t=>t.ms===20000).fn();assert.equal(await kind(started),expected,`deadline with a ${state} context`);
+ }
+ const hls=harness({hls:true});started=hls.player.start('https://fixture/live.m3u8',0,{hls:true});hls.transports[0].handlers.error(null,{fatal:true});hls.contexts[0].module.resolve();
+ assert.equal(await kind(started),'transport');
+ const local=harness();started=local.player.start('https://fixture/a');local.audios[0].played.resolve();local.contexts[0].module.reject(Error('module'));
+ assert.equal(await kind(started),'local','a worklet module failure is a local engine failure');
+ assert.equal(await kind(harness({noWorklet:true}).player.start('https://fixture/a')),'environment');
+});
+test('same-source retries never spend the transport budget on permission or local engine failures',async()=>{
+ const h=recoveryHarness();await connect(h);h.audios[0].onerror();const timer=h.nextRetry();timer.fired=true;const attempt=timer.fn();
+ h.audios.at(-1).played.resolve();h.contexts.at(-1).module.reject(Error('module'));await attempt;
+ assert.equal(h.events.at(-1),'source-reconnect-required');assert.deepEqual(JSON.parse(JSON.stringify(h.details.at(-1))),{reason:'local'});assert.equal(h.nextRetry(),undefined);
+ const suspended=recoveryHarness();await connect(suspended);suspended.contexts[0].state='suspended';suspended.audios[0].onerror();
+ assert.equal(suspended.events.at(-1),'source-reconnect-required');assert.deepEqual(JSON.parse(JSON.stringify(suspended.details.at(-1))),{reason:'permission'});
+});
+test('a timestamp seek outside PCM history flushes before moving media and admits input only at the confirmed position',async()=>{
+ const h=harness(media());const {a,n}=await connectHls(h);
+ for(const r of [1,1.5,2,2.5])play(n,a,r);
+ assert.equal(h.player.timing().position,102.5,'verified contiguous ingestion maps the read head');
+ const count=n.messages.length,moving=h.player.seek(50);
+ assert.deepEqual(n.messages.slice(count).map(m=>m.type),['flush']);assert.equal(a.assigned,undefined,'media does not move before the discard is acknowledged');
+ n.ack(count,engine(2.5,{ingesting:false,available:0}));await tick();
+ assert.deepEqual(a.assigned,[50]);assert.equal(n.messages.length,count+1,'no input is admitted while the element is still seeking');
+ a.onwaiting();assert.equal(h.events.includes('source-waiting'),false,'buffering inside the move is not a source interruption');assert.equal(h.player.stallTimer,null,'the stall watchdog is not armed by the move');
+ a.seeking=false;a.onseeked();assert.equal(n.messages.length,count+1,'seeked alone does not admit input while the element waits');
+ a.onplaying();assert.deepEqual([n.messages[last(n)].type,n.messages[last(n)].value],['ingest',true]);
+ n.ack(last(n),engine(2.5,{available:0}));assert.deepEqual(JSON.parse(JSON.stringify(await moving)),{result:'applied'});
+ assert.ok(Number.isNaN(h.player.timing().position),'the moved position stays unmapped until fresh output verifies');
+ for(const r of [3,3.5,4])play(n,a,r,{offset:47.5});
+ const t=h.player.timing();assert.equal(t.position,51.5);assert.equal(t.utc,BASE+51500);h.player.stop();
+});
+test('a target inside verified contiguous PCM history moves the read head atomically and never moves media',async()=>{
+ const h=harness(media());const {a,n}=await connectHls(h);
+ for(let r=1;r<=10;r+=0.5)play(n,a,r);
+ const count=n.messages.length,moving=h.player.seek(107);
+ assert.equal(n.messages[count].type,'delay');assert.ok(Math.abs(n.messages[count].value-3)<1e-9);
+ n.ack(count,engine(10,{delay:3}));assert.equal((await moving).result,'history');assert.equal(a.assigned,undefined);
+ assert.equal(h.player.timing().position,107,'the audible estimate follows the PCM read head, not the newest input');
+ n.state(engine(10,{delay:3,holding:true}));assert.equal(h.player.timing().position,107,'a hold keeps the retained read head mapping');
+ assert.equal((await h.player.seek(104)).result,'unavailable','no movement while holding');assert.equal(n.messages.length,count+1);h.player.stop();
+});
+test('two rapid seeks and Stop leave no stale flush, seeked or ingest path able to move or revive playback',async()=>{
+ const h=harness(media());const {a,n}=await connectHls(h);
+ for(const r of [1,1.5,2,2.5])play(n,a,r);
+ const first=h.player.seek(50),second=h.player.seek(60);
+ assert.equal((await first).result,'canceled');
+ const flushes=n.messages.flatMap((m,i)=>m.type==='flush'?[i]:[]);assert.equal(flushes.length,2);
+ n.ack(flushes[0],engine(2.5,{ingesting:false}));await tick();assert.equal(a.assigned,undefined,'a superseded acknowledgement cannot move media');
+ n.ack(flushes[1],engine(2.5,{ingesting:false}));await tick();assert.deepEqual(a.assigned,[60]);
+ const seeked=a.onseeked,count=n.messages.length;h.player.stop();assert.equal((await second).result,'canceled');
+ a.seeking=false;seeked?.();assert.equal(n.messages.length,count,'a late seeked callback after Stop sends nothing');
+});
+test('gaps and jumps end the audible mapping; buffered samples keep their own interval until fresh output verifies',async()=>{
+ const h=harness(media());const {a,n}=await connectHls(h);
+ for(const r of [1,1.5,2,2.5])play(n,a,r);
+ a.onwaiting();a.at(130);a.onplaying();assert.equal(n.messages[last(n)].value,true,'a skipped source position is a discontinuous ingest');
+ play(n,a,3,{offset:127});assert.ok(Number.isNaN(h.player.timing().position),'new input is unmapped until verified');
+ n.state(engine(3,{delay:1}));assert.equal(h.player.timing().position,102,'buffered audio keeps its pre-gap mapping');
+ n.state(engine(3,{delay:0.3}));assert.ok(Number.isNaN(h.player.timing().position),'audio received across the gap is never guessed');
+ play(n,a,3.5,{offset:127});play(n,a,4,{offset:127});assert.equal(h.player.timing().position,131);
+ a.onseeking();play(n,a,4.5,{offset:200});assert.ok(Number.isNaN(h.player.timing().position),'an unrequested media jump ends the mapping');h.player.stop();
+});
+test('after a media seek, recovery reconnects at incoming audio and restores the verified audible timestamp',async()=>{
+ const timers=[];const h=harness(media({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}}));const {a,n}=await connectHls(h);
+ for(const r of [1,1.5,2,2.5])play(n,a,r);
+ const moved=h.player.seek(50);n.ack(last(n),engine(2.5,{ingesting:false}));await tick();a.seeking=false;a.onseeked();n.ack(last(n),engine(2.5));assert.equal((await moved).result,'applied');
+ for(const r of [3,3.5,4])play(n,a,r,{offset:47.5});
+ a.onerror();assert.equal(h.events.at(-1),'source-reconnecting');
+ const timer=timers.find(t=>t.ms===1000&&!t.cleared);const retry=timer.fn();
+ const a2=h.audios.at(-1);a2.onplaying();a2.played.resolve();h.contexts.at(-1).module.resolve();await tick();
+ const n2=h.nodes.at(-1);assert.equal(n2.messages[0].type,'ingest','the numeric delay is not restored after a media seek');
+ n2.ack(0,engine(0));await tick();
+ assert.ok(h.events.includes('timeline-restoring'));assert.equal(n2.messages[1].type,'flush');
+ n2.ack(1,engine(0,{ingesting:false}));await tick();assert.ok(Math.abs(a2.assigned[0]-51.5)<0.5,'the target is the captured audible position advanced by elapsed time');
+ a2.seeking=false;a2.onseeked();n2.ack(last(n2),engine(0));await retry;await tick();
+ assert.ok(h.events.includes('timeline-restored'));assert.ok(!h.events.includes('timeline-fallback'));h.player.stop();
+});
+test('without a verified sample, timeline recovery falls back honestly; a listener movement cancels a pending restore',async()=>{
+ const timers=[];const options=media({setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}});
+ const h=harness(options);const {a,n}=await connectHls(h);for(const r of [1,1.5,2,2.5])play(n,a,r);
+ const moved=h.player.seek(50);n.ack(last(n),engine(2.5,{ingesting:false}));await tick();a.seeking=false;a.onseeked();n.ack(last(n),engine(2.5));await moved;
+ a.onerror();const retry=timers.find(t=>t.ms===1000&&!t.cleared).fn();
+ const a2=h.audios.at(-1);a2.onplaying();a2.played.resolve();h.contexts.at(-1).module.resolve();await tick();h.nodes.at(-1).ack(0,engine(0));await retry;
+ assert.equal(h.events.at(-1),'source-reconnected');assert.ok(h.events.includes('timeline-fallback'));
+ assert.equal(h.details[h.events.indexOf('timeline-fallback')].reason,'no-sample');
+ const other=harness(options);const c=await connectHls(other);for(const r of [1,1.5,2,2.5])play(c.n,c.a,r);
+ const seek=other.player.seek(50);c.n.ack(last(c.n),engine(2.5,{ingesting:false}));await tick();c.a.seeking=false;c.a.onseeked();c.n.ack(last(c.n),engine(2.5));await seek;
+ for(const r of [3,3.5,4])play(c.n,c.a,r,{offset:47.5});
+ c.a.onerror();const again=timers.filter(t=>t.ms===1000&&!t.cleared).at(-1).fn();
+ const b=other.audios.at(-1);b.readyState=0;b.onplaying();b.played.resolve();other.contexts.at(-1).module.resolve();await tick();other.nodes.at(-1).ack(0,engine(0));await again;
+ assert.ok(other.events.includes('timeline-restoring'));
+ other.player.command('nudge',1).catch(()=>{});assert.equal(other.events.at(-1),'timeline-canceled');other.player.stop();
+});
+
+// F1: an unconfirmed timestamp move is a local alignment failure. It must never reach transport recovery.
+const fakeTimers=()=>{const timers=[];return{timers,setTimeout:(fn,ms)=>{const t={fn,ms};timers.push(t);return t;},clearTimeout:t=>{if(t)t.cleared=true;}};};
+const live=(timers,ms)=>timers.timers.filter(t=>t.ms===ms&&!t.cleared&&!t.fired);
+const fire=t=>{t.fired=true;return t.fn();};
+const transport=h=>h.events.filter(e=>['source-reconnecting','source-reconnected','source-reconnect-exhausted'].includes(e));
+test('a failed move whose media stays stalled parks the same source past the move and stall deadlines, never spending transport retries',async()=>{
+ const timers=fakeTimers();const h=harness(media(timers));const {a,n}=await connectHls(h);
+ for(const r of [1,1.5,2,2.5])play(n,a,r);
+ a.onwaiting();const watchdog=h.player.stallTimer;assert.ok(watchdog,'an earlier buffering watchdog exists');
+ const moving=h.player.seek(50);assert.equal(watchdog.cleared,true,'the move owns the media; the earlier watchdog is canceled');
+ n.ack(last(n),engine(2.5,{ingesting:false}));await tick();assert.deepEqual(a.assigned,[50]);
+ a.onwaiting();assert.equal(h.player.stallTimer,null,'waiting inside the move arms no watchdog');
+ fire(live(timers,10000).at(-1));assert.equal((await moving).result,'failed');
+ assert.equal(h.player.stallTimer,null,'the failed move arms no transport watchdog');assert.ok(h.player.localTimer,'a local park deadline is armed');
+ a.readyState=2;a.onstalled();a.onwaiting();assert.equal(h.player.stallTimer,null,'late stalled and waiting callbacks stay local');
+ for(const t of live(timers,20000))fire(t);
+ assert.deepEqual(transport(h),[],'no reconnect, retry budget or exhaustion');
+ assert.equal(h.events.at(-1),'source-reconnect-required');assert.equal(h.details.at(-1).reason,'seek');assert.equal(h.states.at(-1),null);
+ assert.equal([1000,2000,4000].some(ms=>live(timers,ms).length),false,'no retry is scheduled');assert.equal(h.contexts[0].closed,true);
+ for(const t of [...live(timers,20000),...live(timers,10000)])fire(t);assert.equal(transport(h).length,0,'stale deadlines stay inert');
+});
+test('after a failed move, a late seek completion readmits input; verified output ends isolation and later stalls use the ordinary policy',async()=>{
+ const timers=fakeTimers();const h=harness(media(timers));const {a,n}=await connectHls(h);
+ for(const r of [1,1.5,2,2.5])play(n,a,r);
+ const moving=h.player.seek(50);n.ack(last(n),engine(2.5,{ingesting:false}));await tick();
+ fire(live(timers,10000).at(-1));assert.equal((await moving).result,'failed');
+ assert.deepEqual([n.messages[last(n)].type,n.messages[last(n)].value],['ingest',false],'input stays gated while the element still seeks');
+ a.seeking=false;a.onseeked();assert.deepEqual([n.messages[last(n)].type,n.messages[last(n)].value],['ingest',true]);assert.equal(h.player.localTimer,null);
+ for(const r of [3,3.5,4])play(n,a,r,{offset:47.5});
+ assert.equal(h.player.isolation,null,'verified contiguous output ends the isolation');assert.equal(h.player.timing().position,51.5);
+ a.onwaiting();assert.ok(h.player.stallTimer,'a genuine later stall arms the ordinary watchdog');
+ fire(h.player.stallTimer);assert.equal(h.events.at(-1),'source-reconnecting','genuine transport failures keep their policy');h.player.stop();
+});
+test('a timeline restore whose moves cannot be confirmed falls back honestly and parks locally instead of reconnecting again',async()=>{
+ const timers=fakeTimers();const h=harness(media(timers));const {a,n}=await connectHls(h);
+ for(const r of [1,1.5,2,2.5])play(n,a,r);
+ const moved=h.player.seek(50);n.ack(last(n),engine(2.5,{ingesting:false}));await tick();a.seeking=false;a.onseeked();n.ack(last(n),engine(2.5));assert.equal((await moved).result,'applied');
+ for(const r of [3,3.5,4])play(n,a,r,{offset:47.5});
+ a.onerror();assert.equal(transport(h).length,1);const retry=fire(live(timers,1000)[0]);
+ const a2=h.audios.at(-1);a2.onplaying();a2.played.resolve();h.contexts.at(-1).module.resolve();await tick();
+ const n2=h.nodes.at(-1);n2.ack(0,engine(0));await retry;await tick();assert.equal(n2.messages[1].type,'flush');
+ for(const seek of [1,2]){
+  n2.ack(last(n2),engine(0,{ingesting:false}));await tick();a2.onwaiting();
+  assert.equal(h.player.stallTimer,null,`restore move ${seek}: no transport watchdog`);
+  fire(live(timers,10000).at(-1));await tick();
+ }
+ assert.equal(n2.messages.filter(m=>m.type==='flush').length,2,'at most two restore moves');
+ const fallback=h.events.indexOf('timeline-fallback');assert.ok(fallback>0);assert.equal(h.details[fallback].issued,true);
+ for(const t of live(timers,20000))fire(t);
+ assert.deepEqual(transport(h),['source-reconnecting','source-reconnected'],'only the original reconnect; no second transport recovery');
+ assert.equal(h.events.at(-1),'source-reconnect-required');assert.equal(h.details.at(-1).reason,'seek');
+});
+
 test('stall watchdog cannot restart a deliberate hold, native pause, or stopped source',async()=>{
  for(const action of ['hold','pause','stop']){
   const h=recoveryHarness();await connect(h);h.audios[0].onwaiting();const timer=h.timers.find(t=>!t.cleared&&t.ms===20000);
@@ -266,4 +451,18 @@ test('stall watchdog cannot restart a deliberate hold, native pause, or stopped 
   if(action!=='pause')timer.fn();else assert.equal(timer.cleared,true);
   assert.equal(h.nextRetry(),undefined);h.player.stop();
  }
+});
+
+test('F3 device and graph construction failures are local and clean up, while permission remains permission',async()=>{
+ for(const stage of ['contextError','sourceError','nodeError','gainError','graphError','sourceConnectError']){
+  const h=harness({[stage]:Error(stage)});const started=h.player.start('https://fixture/local');
+  const rejected=assert.rejects(started,error=>error.kind==='local'&&error.message===stage);
+  if(h.audios[0]?.onplaying){h.audios[0].onplaying();h.audios[0].played.resolve();}
+  h.contexts[0]?.module.resolve();await rejected;
+  assert.equal(h.player.context,null,stage);assert.equal(h.player.sourceConnected,false,stage);
+  if(h.contexts[0])assert.equal(h.contexts[0].closed,true,stage);
+  assert.equal(h.events.includes('source-reconnecting'),false,stage);
+ }
+ const error=Error('denied device');error.name='NotAllowedError';const h=harness({contextError:error});
+ await assert.rejects(h.player.start('https://fixture/local'),e=>e.kind==='permission');
 });
