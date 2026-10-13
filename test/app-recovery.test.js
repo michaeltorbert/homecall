@@ -15,6 +15,7 @@ import { createListenSession, failureKind } from '../src/listen-session.js';
 import { TIMELINE_NOTICE, FALLBACK_NOTICE } from '../src/hls-timeline.js';
 import * as shell from '../src/ui-shell.js';
 import { createBroadcastCountdown } from '../src/broadcast-countdown.js';
+import { applySchoolTheme, schoolThemes, THEME_ROLES } from '../src/school-theme.js';
 globalThis.__GATEWAY_ORIGIN__='https://gateway.example';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
@@ -54,7 +55,7 @@ function harness(t, catalogFactory, extra={}) {
  Object.assign(w,{setupGameTiming:options=>{fakeTiming.options=options;return fakeTiming;},setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,status:'unavailable',stop(){},setEnabled(){},relabel(){},refresh(){}}),
   PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{},listenTeams,resolveSources,officialLink,createListenSession,failureKind,TIMELINE_NOTICE,FALLBACK_NOTICE,
   createGameStatus:()=>({setGames(){},clear(){},suspend(){},resume(){},tick(){},stop(){}}),createBroadcastCountdown:options=>{fakeCountdown.options=options;return fakeCountdown;},
-  createNowPlaying,nowPlayingArtwork,createScoreboard,metadataURL,configuredGatewayOrigin,gatewayOptions,readJSON:async()=>{throw Error('no metadata in recovery tests');},...shell,...extra});
+  createNowPlaying,nowPlayingArtwork,createScoreboard,metadataURL,configuredGatewayOrigin,gatewayOptions,readJSON:async()=>{throw Error('no metadata in recovery tests');},applySchoolTheme,...shell,...extra});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
  w.URL.revokeObjectURL=()=>{};w.eval(source);const $=id=>w.document.getElementById(id);
  return {w,player,timing:fakeTiming,countdown:fakeCountdown,get catalog(){return catalog},$,prompt:()=>$('confirm-dialog').hasAttribute('open'),proceed:()=>$('confirm-continue').click(),dismiss:()=>$('confirm-cancel').click(),
@@ -581,4 +582,39 @@ test('countdown ticks, polls, zero crossing and errors never change playback, de
  assert.deepEqual(reads,['broadcast/schedule/duke','broadcast/schedule/duke','broadcast/schedule/duke']);
  assert.deepEqual(snapshot(),before);assert.equal(h.$('status').textContent,'Playing');
  h.$('team').value='miami';h.$('team').onchange();h.proceed();assert.equal(h.$('broadcast-next').hidden,true);assert.equal(reads.length,3);
+});
+
+// Selected-school appearance (issue #33): the committed school only; never a pending, catalog-only or previous school.
+const SAMPLE='5f0c2a1e-3b4d-4c6e-8f90-a1b2c3d4e5f6';
+const appearance=h=>{const root=h.w.document.documentElement;return {school:root.dataset.school??null,...Object.fromEntries(Object.entries(THEME_ROLES).map(([role,token])=>[role,root.style.getPropertyValue(token)]))};};
+const themed=key=>({school:key,...schoolThemes[key]});
+const neutral=Object.fromEntries([['school',null],...Object.keys(THEME_ROLES).map(role=>[role,''])]);
+test('the school theme follows only the committed Listen school; catalog-only schools reset every token to the same fallback',async t=>{
+ const list=[{id:'b3c33c46-a9e4-4e3b-9d5a-4fefb625f14c',name:'Virginia'},{id:'ffacbef1-e8a5-4872-9401-eff97cdf2c9c',name:'Auburn'},{id:SAMPLE,name:'Sample School'}];
+ const h=harness(t,gameCatalog('unavailable'),{readJSON:async url=>{if(url.pathname.endsWith('/homestream/teams'))return list;throw Error('unexpected');}});await settle();
+ assert.deepEqual(appearance(h),themed('duke'),'startup applies the committed school');
+ for(const key of ['miami','vt','gt','uva','auburn']){h.$('team').value=key;h.$('team').onchange();assert.deepEqual(appearance(h),themed(key),key);}
+ h.$('team').value=`catalog:${SAMPLE}`;h.$('team').onchange();assert.deepEqual(appearance(h),neutral,'a catalog-only school never inherits Auburn');
+ h.$('team').value='miami';h.$('team').onchange();assert.deepEqual(appearance(h),themed('miami'));
+ h.$('team').value=`catalog:${SAMPLE}`;h.$('team').onchange();assert.deepEqual(appearance(h),neutral,'the same fallback every time');
+ h.$('team').value='duke';h.$('team').onchange();h.$('connect').click();await settle();
+ h.$('team').value='vt';h.$('team').onchange();assert.equal(h.prompt(),true);assert.deepEqual(appearance(h),themed('duke'),'a pending change keeps the committed theme');
+ h.dismiss();assert.deepEqual(appearance(h),themed('duke'),'Cancel keeps the committed theme');
+ h.$('team').value='vt';h.$('team').onchange();h.$('confirm-dialog').dispatchEvent(new h.w.KeyboardEvent('keydown',{key:'Escape'}));
+ assert.equal(h.prompt(),false);assert.deepEqual(appearance(h),themed('duke'),'Escape keeps the committed theme');
+ h.$('team').value='vt';h.$('team').onchange();h.player.event('source-error');
+ assert.equal(h.prompt(),false);assert.deepEqual(appearance(h),themed('duke'),'a terminal error cancels the prompt without recoloring');
+ assert.equal(h.player.starts.length,1,'no declined path touched audio');
+ h.$('team').value='vt';h.$('team').onchange();h.proceed();assert.deepEqual(appearance(h),themed('vt'),'Continue changes it');
+ h.$('team').value='duke';h.$('team').onchange();h.$('feed').value='duke-wtib';h.$('feed').onchange();assert.deepEqual(appearance(h),themed('duke'),'a source change is not a school change');
+ await h.catalog.refresh();assert.deepEqual(appearance(h),themed('duke'),'a catalog reload is not a school change');
+});
+test('Recordings drives the appearance only through its callback; a Listen team change while Recordings is visible keeps it',async t=>{
+ let archive,mode='live';
+ const h=harness(t,undefined,{setupArchive:options=>{archive=options;return {select(){},get mode(){return mode;}};}});
+ archive.onSchool('vt');assert.deepEqual(appearance(h),themed('vt'));
+ archive.onSchool(`catalog:${SAMPLE}`);assert.deepEqual(appearance(h),neutral);
+ archive.onSchool('miami');mode='archive';
+ h.$('team').value='gt';h.$('team').onchange();assert.deepEqual(appearance(h),themed('miami'),'the visible Recordings school keeps the theme');
+ assert.equal(archive.selectedTeam(),'gt');archive.onSchool(archive.selectedTeam());assert.deepEqual(appearance(h),themed('gt'),'returning to Listen applies its committed school');
 });
