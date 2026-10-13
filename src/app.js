@@ -16,6 +16,7 @@ import { createListenSession, failureKind } from './listen-session.js';
 import { createGameStatus } from './game-status.js';
 import { createBroadcastCountdown } from './broadcast-countdown.js';
 import { TIMELINE_NOTICE, FALLBACK_NOTICE } from './hls-timeline.js';
+import { applySchoolTheme } from './school-theme.js';
 const $ = id => document.getElementById(id);
 let storage;
 try { storage = localStorage; } catch { /* Private browsing may deny access. */ }
@@ -290,6 +291,8 @@ function teamChanged() {
   catalog.setEnabled(!!currentTeam().catalogId);
   rebuildSources(); showSource(); notice(''); render();
   countdown.setSchool(selected);
+  // The visible view's committed school owns the appearance; Recordings applies its own school.
+  if (nav?.mode !== 'archive') applySchoolTheme(document.documentElement, selected);
 }
 function sourceChanged() {
   const id = $('feed').value;
@@ -629,5 +632,6 @@ setupShell({ doc: document, onMenuOpen: () => { $('menu-reconnect').disabled = !
 teamChanged(); refreshSessions(); render();
 
 const liveActive = () => active || connecting;
-nav = setupArchive({ stopLive: disconnect, liveActive, confirm: ask, selectedTeam: () => selected, memory, nowPlaying }) ?? null;
+nav = setupArchive({ stopLive: disconnect, liveActive, confirm: ask, selectedTeam: () => selected, memory, nowPlaying,
+  onSchool: key => applySchoolTheme(document.documentElement, key) }) ?? null;
 loadTeams();

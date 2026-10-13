@@ -1,4 +1,6 @@
-/* Homecall · compact graphite player with one stable blue accent.
+/* Homecall · compact graphite player with a restrained selected-school accent.
+   The --accent-* tokens below are the neutral fallback; src/school-theme.js sets them on the root for a
+   curated school. Status, links, focus, warnings, errors and success stay fixed for every school.
    Order: tokens, base, controls, shell, menu, alerts, player, matching, game timing, recordings,
    dialogs, responsive, motion. */
 
@@ -16,11 +18,19 @@
   --field-line: #3a404a;
   --surface: #1b1f26;
   --surface-hover: #252b36;
-  --blue: #8daeff;
-  --blue-hover: #a6beff;
-  --on-blue: #10151e;
+  --neutral-fill: #c6ccd6;
+  --neutral-fill-hover: #dde1e8;
+  --on-neutral: #10151e;
+  --accent-fill: var(--neutral-fill);
+  --accent-fill-hover: var(--neutral-fill-hover);
+  --on-accent: var(--on-neutral);
+  --accent-edge: var(--neutral-fill);
+  --accent-edge-hover: var(--neutral-fill-hover);
+  --accent-ink: var(--ink);
+  --accent-range: var(--neutral-fill);
+  --info: #8daeff;
   --link: #b9ceff;
-  --focus: #aac5ff;
+  --focus: #e3e7ee;
   --warn: #ffcc92;
   --warn-bg: #33281e;
   --warn-edge: #d4a56a;
@@ -75,8 +85,8 @@ button {
 button:hover:not(:disabled) { border-color: #7e91b5; background: var(--surface-hover); }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: 0.42; cursor: default; }
-button.primary { background: var(--blue); color: var(--on-blue); border-color: var(--blue); font-weight: 650; }
-button.primary:hover:not(:disabled) { background: var(--blue-hover); border-color: var(--blue-hover); }
+button.primary { background: var(--accent-fill); color: var(--on-accent); border-color: var(--accent-edge); font-weight: 650; }
+button.primary:hover:not(:disabled) { background: var(--accent-fill-hover); border-color: var(--accent-edge-hover); }
 button.quiet { background: none; border-color: transparent; color: var(--muted); }
 button.quiet:hover:not(:disabled) { background: var(--surface-hover); border-color: transparent; color: var(--ink); }
 button.danger { color: var(--danger); border-color: var(--danger-line); }
@@ -118,7 +128,7 @@ input[type=range] {
   min-width: 0;
   min-height: 44px;
   margin: 0;
-  accent-color: var(--blue);
+  accent-color: var(--accent-range);
   background: transparent;
   cursor: pointer;
   touch-action: pan-y;
@@ -179,7 +189,7 @@ header { display: flex; flex-wrap: wrap; align-items: center; justify-content: s
 }
 .main-nav button:hover:not(:disabled) { background: #181c23; border-color: transparent; }
 .main-nav button[aria-selected=true],
-.main-nav button[aria-selected=true]:hover { color: var(--blue); border-bottom-color: var(--blue); font-weight: 650; }
+.main-nav button[aria-selected=true]:hover { color: var(--accent-ink); border-bottom-color: var(--accent-ink); font-weight: 650; }
 
 main { min-height: 350px; }
 
@@ -225,7 +235,7 @@ footer {
   text-align: left;
 }
 #menu button:hover:not(:disabled), #menu a:hover { background: #2b3240; text-decoration: none; }
-#menu [aria-current=true]::after { content: "✓"; margin-left: auto; color: var(--blue); }
+#menu [aria-current=true]::after { content: "✓"; margin-left: auto; color: var(--accent-ink); }
 #menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
 
 /* ---------- Alerts outside every view and tool ---------- */
@@ -269,14 +279,14 @@ body[data-view=live] #owner-strip { display: none !important; }
 .field-meta p:empty { display: none; }
 .field-meta button { flex: 0 0 auto; }
 .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--info); }
 /* The source actually playing (or about to play) stays visible; the switch notice is brief and quiet. */
 .source-current { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
 .source-current:empty { display: none; }
 .switch-notice {
   margin: 14px 0 0;
   padding: 10px 14px;
-  border-left: 3px solid var(--blue);
+  border-left: 3px solid var(--info);
   background: #1a2233;
   color: var(--ink);
   font-size: 13px;
@@ -294,7 +304,12 @@ body[data-view=live] #owner-strip { display: none !important; }
 }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .actions > * { flex: 1; }
-#recovery-actions { margin: 0; padding: 0 14px 12px; background: var(--warn-bg); border-left: 3px solid var(--warn-edge); }
+/* Inside a warning the recovery action is the same neutral button for every school, never a school color. */
+#recovery-actions {
+  margin: 0; padding: 0 14px 12px; background: var(--warn-bg); border-left: 3px solid var(--warn-edge);
+  --accent-fill: var(--neutral-fill); --accent-fill-hover: var(--neutral-fill-hover); --on-accent: var(--on-neutral);
+  --accent-edge: var(--neutral-fill); --accent-edge-hover: var(--neutral-fill-hover);
+}
 #recovery-actions > #recover-note { flex: 1 1 100%; margin: 0; color: var(--warn-ink); }
 .transport { display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; margin: 22px 0; }
 .transport button { min-height: 51px; }
@@ -371,7 +386,7 @@ body[data-view=live] #owner-strip { display: none !important; }
   text-align: left;
 }
 .archive-list button:hover:not(:disabled) { background: none; }
-.archive-list button::after { content: "▶"; grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--blue); font-size: 13px; }
+.archive-list button::after { content: "▶"; grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--accent-ink); font-size: 13px; }
 .archive-list strong { grid-column: 1; font-size: 15px; font-weight: 550; }
 .archive-list span { grid-column: 1; color: var(--muted); font-size: 12px; }
 #archive-official { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; }
@@ -431,4 +446,26 @@ dialog .actions { margin-top: 20px; }
 @keyframes reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+/* ---------- Selected B · School night ---------- */
+/* Dark school-tinted canvases and surfaces; uncurated schools keep the graphite defaults above. */
+:root[data-school="duke"]   { --school-canvas: #0b1226; --surface: #141d36; --surface-hover: #1d2846; --line: #27324f; --field-line: #313d5e; }
+:root[data-school="gt"]     { --school-canvas: #0a1421; --surface: #122031; --surface-hover: #1a2b40; --line: #23344a; --field-line: #2c3f57; }
+:root[data-school="miami"]  { --school-canvas: #08170f; --surface: #0f2219; --surface-hover: #173024; --line: #20392c; --field-line: #284636; }
+:root[data-school="vt"]     { --school-canvas: #1a0c12; --surface: #26141b; --surface-hover: #321c25; --line: #3d2530; --field-line: #4a2d3a; }
+:root[data-school="auburn"] { --school-canvas: #0a1220; --surface: #121c2e; --surface-hover: #1a263c; --line: #243149; --field-line: #2d3b56; }
+:root[data-school="uva"]    { --school-canvas: #10131f; --surface: #181c2c; --surface-hover: #212739; --line: #2b3247; --field-line: #353d55; }
+:root[data-school] { background: var(--school-canvas); }
+:root[data-school] .main-nav button:hover:not(:disabled) { background: var(--surface); }
+:root[data-school] #menu { background: var(--surface); border-color: var(--field-line); }
+:root[data-school] #menu :is(button, a):hover:not(:disabled) { background: var(--surface-hover); }
+:root[data-school] dialog { background: var(--surface); border-color: var(--field-line); }
+
+/* Keep disabled primary playback actions legible across curated and fallback schools. */
+:is(.transport, .hold-area, .sync-clock-form) button.primary:disabled {
+  background: transparent;
+  border-color: var(--accent-edge);
+  color: var(--muted);
+  opacity: 0.6;
 }

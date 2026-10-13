@@ -2,7 +2,9 @@ import { metadataURL, configuredGatewayOrigin, gatewayOptions } from './gateway.
 import { teams } from './teams.js';
 import { catalogFreshness, filterReplays, seekReplay, stopReplay, validateCatalog } from './replay.js';
 import { createConfirm } from './ui-shell.js';
-export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null, liveActive = () => false, confirm = createConfirm(document), origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal, now = () => Date.now(), every = fn => document.defaultView?.setInterval(fn, 60_000) }) {
+// onSchool receives the school whose appearance the visible view shows: the committed Recordings school,
+// or selectedTeam() on returning to Listen. It is appearance only and never sees a pending choice.
+export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null, liveActive = () => false, onSchool = () => {}, confirm = createConfirm(document), origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal, now = () => Date.now(), every = fn => document.defaultView?.setInterval(fn, 60_000) }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
   let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
@@ -54,6 +56,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null
     $('live-panel').hidden = mode !== 'live';
     $('archive-panel').hidden = mode !== 'archive';
     if (mode === 'archive') { $('archive-team').value = [...$('archive-team').options].some(o => o.value === selectedTeam()) ? selectedTeam() : 'duke'; render(true); }
+    else onSchool(selectedTeam());
     focusField(focus);
   }
   // Game broadcasts focuses the Listen game choice when one is shown, otherwise the team choice.
@@ -112,7 +115,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null
   function render(reset = false) {
     const key = $('archive-team').value, team = teams[key], source = catalog?.schools[key];
     $('archive-official').href = source?.source || team.official;
-    if (reset) { stop(); committedSchool = key; $('archive-sport').value = ''; $('archive-year').value = ''; }
+    if (reset) { stop(); committedSchool = key; $('archive-sport').value = ''; $('archive-year').value = ''; onSchool(key); }
     {
       const items = source?.items || [];
       options('archive-sport', [...new Set(items.map(x => x.sport))].sort(), 'All sports');

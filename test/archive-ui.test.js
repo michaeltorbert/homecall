@@ -85,6 +85,23 @@ test('malformed catalog is rejected before becoming active and school changes re
   await settle();h.$('archive-tab').click();assert.match(h.$('archive-note').textContent,/could not load/);
   h.$('archive-team').value='miami';assert.doesNotThrow(()=>h.$('archive-team').onchange());
 });
+test('appearance follows the visible committed school: Recordings school on entry and Continue, Listen school on return, never a pending choice',async t=>{
+  const schools=[];
+  const h=harness(t,undefined,undefined,undefined,{selectedTeam:()=>'gt',onSchool:key=>schools.push(key)});await settle();
+  assert.deepEqual(schools,[],'setup and catalog load leave the Listen appearance alone');
+  h.$('archive-tab').click();assert.deepEqual(schools,['duke'],'a Listen school without recordings shows Duke, as Recordings does');
+  h.$('archive-team').value='vt';h.$('archive-team').onchange();assert.deepEqual(schools,['duke','vt']);
+  h.$('archive-team').value='duke';h.$('archive-team').onchange();h.$('archive-list').querySelector('button').click();
+  h.$('archive-sport').value='Football';h.$('archive-sport').onchange();h.$('archive-retry').click();await settle();
+  assert.deepEqual(schools,['duke','vt','duke'],'playing, filters and refresh are not school changes');
+  h.$('archive-team').value='miami';h.$('archive-team').onchange();assert.equal(h.prompt(),true);h.dismiss();
+  h.$('archive-team').value='miami';h.$('archive-team').onchange();h.$('confirm-dialog').dispatchEvent(new h.dom.window.KeyboardEvent('keydown',{key:'Escape'}));
+  h.$('listen-tab').click();assert.equal(h.prompt(),true);h.dismiss();
+  assert.deepEqual(schools,['duke','vt','duke'],'Cancel and Escape never recolor');assert.equal(h.$('archive-team').value,'duke');assert.equal(h.audio.src,item.url);
+  h.$('archive-team').value='miami';h.$('archive-team').onchange();h.proceed();assert.deepEqual(schools.at(-1),'miami');
+  h.$('listen-tab').click();assert.deepEqual(schools.at(-1),'gt','returning to Listen restores its committed school');
+  const count=schools.length;h.$('listen-tab').click();assert.equal(schools.length,count,'the selected tab is a no-op');
+});
 
 test('replay restores after metadata and saves before unloading without overwriting an unloaded bookmark',async t=>{
  const saved=[];const memory={read:()=>({value:125}),save:(...args)=>saved.push(args)};

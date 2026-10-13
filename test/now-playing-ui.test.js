@@ -16,6 +16,7 @@ import { createListenSession, failureKind } from '../src/listen-session.js';
 import { TIMELINE_NOTICE, FALLBACK_NOTICE } from '../src/hls-timeline.js';
 import { setupArchive } from '../src/archive.js';
 import * as shell from '../src/ui-shell.js';
+import { applySchoolTheme } from '../src/school-theme.js';
 globalThis.__GATEWAY_ORIGIN__ = 'https://gateway.example';
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const strip = file => readFileSync(new URL(file, import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace('export function', 'function');
@@ -88,7 +89,7 @@ function live(t, { mediaSession = true, games = { [GT]: { game: GT_GAME, list: G
   w.URL.revokeObjectURL = () => {};
   Object.assign(w, { setupGameTiming: () => ({ start() {}, stop() {}, reset() {}, invalidate() {}, render() {} }), setupArchive: options => { h.archiveOptions = options; }, setupHomestream: catalogFactory,
     createBroadcastCountdown: () => ({ setSchool() {}, tick() {}, suspend() {}, resume() {}, stop() {} }), createGameStatus: () => ({ setGames() {}, clear() {}, suspend() {}, resume() {}, tick() {}, stop() {} }), listenTeams, resolveSources, officialLink, createListenSession, failureKind, TIMELINE_NOTICE, FALLBACK_NOTICE,
-    PlaybackMemory, SessionLog, teams, getSources, Player: FakePlayer, demoURL: () => 'blob:demo', createNowPlaying, nowPlayingArtwork, createScoreboard, readJSON, metadataURL, configuredGatewayOrigin, gatewayOptions, ...shell });
+    PlaybackMemory, SessionLog, teams, getSources, Player: FakePlayer, demoURL: () => 'blob:demo', createNowPlaying, nowPlayingArtwork, createScoreboard, readJSON, metadataURL, configuredGatewayOrigin, gatewayOptions, applySchoolTheme, ...shell });
   w.eval(strip('../src/app.js'));
   h.$ = id => w.document.getElementById(id);
   // Changing an active session's team or source now asks first; Continue applies the original change.
