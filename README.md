@@ -257,19 +257,26 @@ session can never clear its replacement.
 - **No score in the image.** No score is drawn into any image, and the image
   stays the same while the score text changes.
 
-The artist field names the part of the app that is playing, using the menu and
-tab names: `Homecall · Radio stations`, `Homecall · Game broadcasts`,
-`Homecall · Recordings` or `Homecall · Test tone`. While a score is shown, the
-matchup comes first, for example
-`Georgia Tech vs Duke · Homecall · Game broadcasts`. The title and album
-identify the audio:
+Listen playback uses the unified app name `Listen` in Now Playing. Radio title
+is the selected station; artist and album retain that candidate's public
+station text (for example `Homecall · Listen · WSJS · Duke affiliate`). A game
+title is the catalog matchup. When a validated score is shown, the artist starts
+with the matchup and retains the selected game's public source (for example
+`Georgia Tech vs Duke · Homecall · Listen · Georgia Tech · Homestream`). The
+game source remains in artist and album when a validated score replaces the
+title. The explicit Listen surface marker applies only to actual Listen start
+claims; older callers without it keep their established mode labels. A blank
+source falls back to the existing album or school text. Source strings are
+control-character cleaned and bounded; feed URLs and private route details are
+not published.
 
-- **Radio stations** (Duke, Miami, Virginia Tech and Duke affiliates): the
-  station name and school. Radio is never matched to a game from the kickoff
-  time or a single live event, so it never shows a score.
-- **Game broadcasts**: the catalog matchup, for example "Georgia Tech vs Duke".
-  This covers Georgia Tech catalog games played from Listen and broadcasts for
-  all four supported schools.
+- **Listen radio** (Duke, Miami, Virginia Tech and their configured backups):
+  the chosen candidate's station text identifies the primary network, backup
+  connection or affiliate. Radio is never matched to a game from kickoff time
+  or a single live event, so it never shows a score.
+- **Listen game feeds**: the catalog matchup and candidate source, across
+  supported schools. `Game broadcasts` remains a navigation alias into Listen,
+  not a separate Now Playing identity.
 - **Recordings**: the recording's school and opponent, with no score or result.
 - **Test tone**: the test-tone title.
 

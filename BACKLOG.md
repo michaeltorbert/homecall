@@ -79,7 +79,7 @@ Release stays 0.4.0; the build hash identifies the deployment. Issue #19 stays o
 
 - **NOW-PLAYING-01 (open, native/live/car gate)**: Verify on supported phones (iPhone lock screen; Android if the owner elects) and the car integration actually used: artwork, title, artist and album text, truncation, and the existing controls.
   - Device, browser and car models are unknown. The original issue photos were not available to implementation.
-  - Exercise each mode: Radio stations, a Georgia Tech game from Listen, Game broadcasts, Recordings and Test tone.
+  - Exercise Listen radio and a catalog game from Listen (including the Game broadcasts navigation alias), Recordings and Test tone. Confirm the selected public candidate source remains identifiable through score updates and fallback.
   - Check each of the five artwork images on the device: Duke, Miami, Virginia Tech and Georgia Tech, plus the generic image. Check crop, legibility of the school name and caching across a source switch. Local browser renderings in the evidence showcase are not device proof.
   - Exercise stale and terminal cases: pause, reconnect, stop, game end, source switch, and a live-to-final transition.
   - During an actual supported live game, record the raw competition- and event-level status, period, clock and score fields, plus the deployed `scoreboard` across polls.
@@ -91,6 +91,7 @@ Release stays 0.4.0; the build hash identifies the deployment. Issue #19 stays o
   - The title may be truncated by the platform, but source and receipt time come before the score.
   - Blanket clearing on `visibilitychange: hidden` was rejected because it would remove the requested locked-screen information. Revisit only with device evidence.
 - **NOW-PLAYING-03 (follow-up; disclosed fallback)**: Ordinary Live radio (Duke and affiliates, Miami, Virginia Tech) has no bound game and never shows a score. Identity-only metadata is the graceful fallback #19 asks for when game data is unavailable, not a removal of the score requirement for bound games. A durable, explicit radio-to-game association would be needed first; never guess from kickoff time, a single live event or fuzzy names (Virginia Tech ≠ Virginia).
+- **NOW-PLAYING-04 (source complete in the local candidate; native acceptance open)**: Actual Listen claims publish `Listen` and preserve the selected candidate's public station text in artist and album, including when a score replaces the game title. Browser payload tests do not establish how phone or car surfaces truncate or cache those fields; verify under NOW-PLAYING-01.
 - **NOW-PLAYING-ART-01 (source implemented in the local candidate; native verification open)**: The owner has now requested team-specific artwork. This supersedes the earlier note that no per-team map was authorized.
   - **Source.** Duke, Miami, Virginia Tech and Georgia Tech each get an original 512 × 512 PNG: the Homecall mark over the plain school name, drawn as geometric strokes with no font. There are no logos, monograms, mascots or redistributed marks.
   - **Generic image.** `homecall-512.png` is unchanged. It remains the image for Test tone and for any unknown, missing or non-exact school.
@@ -206,6 +207,10 @@ Limited exceptions for #12 and #19 (intermediate; none closes an issue or is a p
   - Invalid chronology or edge: generic copy.
 
   Expired or gapped targets are never clamped or interpolated. On connected audio, user seeks, Jump to incoming, pause and native-control pointer/keyboard gestures cancel restoration. During unloaded retry backoff, in-page movement is disabled; native-control pointer/keyboard gestures still cancel and Stop remains available. Later intent clears a completed recovery notice. Listeners may briefly hear incoming audio first, and post-seek loading adds delay. TV alignment is not guaranteed. Server-side, game capabilities now last six hours and expired ones answer 403, so expiry no longer causes this during a game; provider hiccups still do. Real-browser/phone acceptance remains open under DEVICE-01, CONTINUITY-01 and TIMING-01.
+
+## Tooling dependency assessment
+
+- **TOOLING-DEPENDENCY-01 (assessment needed)**: The October 14, 2026 `npm audit` snapshot reports advisories involving `miniflare`, `sharp`, `source-map-js`, `undici` and `wrangler`. Exploitability and whether affected paths ship or run only in local/build tooling are not assessed. Map each advisory to supported runtime/build paths, then evaluate compatible supported fixes and run the relevant Worker/build checks. Do not use blind `npm audit fix --force` or a major downgrade. Keep implementation and dependency changes scoped to that follow-up.
 
 ## Unified Listen (issue #30; release candidate; physical-device checks accepted after release)
 

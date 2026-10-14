@@ -72,6 +72,23 @@ test('live text keeps source and receipt date/time in the same title as score an
     'Live · ESPN data received 10/7, 3:41 PM · Duke 14, Georgia Tech 17 · Q2 7:29');
   assert.equal(nowPlayingText({ mode: 'game', school: 'Georgia Tech', opponent: 'Duke', album: 'Georgia Tech · Homestream' }, snap(), { formatTime: at }).artist, 'Georgia Tech vs Duke · Homecall · Game broadcasts');
 });
+test('Listen claims use Listen identity and retain the frozen public source through score changes', () => {
+  const game = { mode: 'game', surface: 'listen', school: 'Georgia Tech', opponent: 'Duke', source: 'Georgia Tech · Homestream' };
+  const plain = nowPlayingText(game);
+  assert.deepEqual(plain, { title: 'Georgia Tech vs Duke', artist: 'Homecall · Listen · Georgia Tech · Homestream', album: 'Georgia Tech · Homestream' });
+  const scored = nowPlayingText(game, snap(), { formatTime: at });
+  assert.equal(scored.artist, 'Georgia Tech vs Duke · Homecall · Listen · Georgia Tech · Homestream');
+  assert.equal(scored.album, plain.album);
+  assert.match(scored.title, /ESPN data received 10\/7, 3:41 PM.*Georgia Tech 17, Duke 14/);
+  assert.deepEqual(nowPlayingText(game, null), plain, 'removing volatile score data restores the same source identity');
+  const radio = { mode: 'live', surface: 'listen', school: 'Duke', title: 'WSJS · Duke affiliate', source: 'WSJS · Duke affiliate' };
+  assert.deepEqual(nowPlayingText(radio, snap(), { formatTime: at }), { title: 'WSJS · Duke affiliate', artist: 'Homecall · Listen · WSJS · Duke affiliate', album: 'WSJS · Duke affiliate' });
+  const bounded = nowPlayingText({ ...radio, source: `WSJS\n${'x'.repeat(120)}\u0000` });
+  assert.ok(bounded.artist.length < 120 && bounded.album.length <= 80);
+  assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(bounded.artist + bounded.album));
+  const emptySource = nowPlayingText({ ...game, source: ' \n ' });
+  assert.deepEqual(emptySource, { title: 'Georgia Tech vs Duke', artist: 'Homecall · Listen', album: 'Georgia Tech' });
+});
 test('display labels are the app menu and tab names; old internal labels never appear', () => {
   const labels = Object.fromEntries(['live', 'game', 'sync', 'archive', 'demo'].map(mode => [mode, nowPlayingText({ mode, school: 'Duke', opponent: 'Tulane' }).artist]));
   assert.deepEqual(labels, { live: 'Homecall · Radio stations', game: 'Homecall · Game broadcasts', sync: 'Homecall · Game broadcasts', archive: 'Homecall · Recordings', demo: 'Homecall · Test tone' });
