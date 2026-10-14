@@ -345,7 +345,8 @@ function startCandidate(candidate, { trigger = 'play', replacement = false, prev
   // Identity is frozen at this candidate. Radio is never guessed into a game, so only a catalog game
   // feed can add a scoreboard.
   const owner = liveOwner = nowPlaying.claim(candidate.demo ? { mode: 'demo', title: candidate.title }
-    : candidate.game ? { mode: 'game', school: team.name, opponent: candidate.game.opponent, album: candidate.station } : { mode: 'live', school: team.name, title: candidate.station });
+    : candidate.game ? { mode: 'game', surface: 'listen', school: team.name, opponent: candidate.game.opponent, source: candidate.station }
+      : { mode: 'live', surface: 'listen', school: team.name, title: candidate.station, source: candidate.station });
   if (candidate.game && liveCatalog && nowPlaying.supported) liveBoard.start({ teamId: liveCatalog.teamId, school: team.name, game: candidate.game, games: liveCatalog.games, eligible: livePlaying, onUpdate: snapshot => owner.update(snapshot) });
   if (candidate.game) timing.start(candidate.game);
   showSource(); refreshSessions(log.session.id); render();

@@ -50,9 +50,12 @@ export function periodText(board) {
 export function nowPlayingText(identity, snapshot = null, { formatTime = formatReceipt } = {}) {
   const school = clean(identity.school, MAX_NAME), opponent = clean(identity.opponent, MAX_NAME);
   const matchup = school && opponent ? `${school} vs ${opponent}` : '';
-  const mode = MODES[identity.mode] || 'Audio';
-  const album = clean(identity.album, MAX_TEXT) || school || 'Homecall';
-  const plain = { title: clean(identity.title, MAX_TEXT) || matchup || school || 'Homecall', artist: `Homecall · ${mode}`, album };
+  const listen = identity.surface === 'listen';
+  const mode = listen ? 'Listen' : MODES[identity.mode] || 'Audio';
+  const source = clean(identity.source, MAX_TEXT);
+  const album = (listen && source) || clean(identity.album, MAX_TEXT) || school || 'Homecall';
+  const listenArtist = ['Homecall', mode, source].filter(Boolean).join(' · ');
+  const plain = { title: clean(identity.title, MAX_TEXT) || matchup || school || 'Homecall', artist: listen ? listenArtist : `Homecall · ${mode}`, album };
   const board = snapshot?.board;
   if (!board || !matchup || !BOARD_MODES.has(identity.mode)) return plain;
   let time = '';
@@ -61,7 +64,7 @@ export function nowPlayingText(identity, snapshot = null, { formatTime = formatR
   const ids = Object.keys(board.scores || {}), other = ids.find(id => id !== snapshot.providerId);
   // The selected school is shown first by provider ID, never by provider array or home/away order.
   const score = ids.length === 2 && ids.includes(snapshot.providerId) && other ? `${school} ${board.scores[snapshot.providerId]}, ${opponent} ${board.scores[other]}` : '';
-  return { title: ['Live', `ESPN data received ${time}`, score, periodText(board)].filter(Boolean).join(' · '), artist: `${matchup} · Homecall · ${mode}`, album };
+  return { title: ['Live', `ESPN data received ${time}`, score, periodText(board)].filter(Boolean).join(' · '), artist: listen ? `${matchup} · ${listenArtist}` : `${matchup} · Homecall · ${mode}`, album };
 }
 // artwork: one image URL string for every identity (compatibility), or identity => URL|null,
 // resolved once per claim from the frozen identity. Scores are never part of the artwork.

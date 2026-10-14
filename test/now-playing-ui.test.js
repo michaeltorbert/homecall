@@ -109,13 +109,13 @@ test('Listen GT: browsing never claims; Play freezes identity; score appears onl
   h.selectGT();
   assert.equal(h.ms.writes.length, 0, 'team browsing and catalog readiness never claim');
   h.$('connect').click();
-  const STATIC = { title: 'Georgia Tech vs Duke', artist: 'Homecall · Game broadcasts', album: 'Georgia Tech · Homestream', art: [TEAM_ART('gt')] };
+  const STATIC = { title: 'Georgia Tech vs Duke', artist: 'Homecall · Listen · Georgia Tech · Homestream', album: 'Georgia Tech · Homestream', art: [TEAM_ART('gt')] };
   assert.deepEqual(h.meta(), STATIC);
   await flush();
   assert.equal(h.statusReads(), 0, 'connected but no PCM output state yet');
   h.player.update(PLAYING); await flush();
   assert.match(h.ms.metadata.title, SCORE);
-  assert.equal(h.ms.metadata.artist, 'Georgia Tech vs Duke · Homecall · Game broadcasts');
+  assert.equal(h.ms.metadata.artist, 'Georgia Tech vs Duke · Homecall · Listen · Georgia Tech · Homestream');
   assert.deepEqual(h.meta().art, [TEAM_ART('gt')], 'the score never changes the selected school\'s image');
   assert.deepEqual(h.gameReads().slice(0, 2), ['sync/teams', 'sync/status/59/2026']);
   for (const [name, change, restore] of [
@@ -196,16 +196,19 @@ test('Listen radio, affiliates and the demo publish station or test-tone identit
   h.player.update(PLAYING);
   for (let i = 0; i < 30; i++) h.tick();
   await flush();
-  assert.deepEqual(h.meta(), { title: 'Duke Sports Network', artist: 'Homecall · Radio stations', album: 'Duke', art: [TEAM_ART('duke')] });
+  assert.deepEqual(h.meta(), { title: 'Duke Sports Network', artist: 'Homecall · Listen · Duke Sports Network', album: 'Duke Sports Network', art: [TEAM_ART('duke')] });
   assert.deepEqual(h.gameReads(), [], 'no game is guessed for radio, so no status is read');
   h.$('feed').value = 'duke-wsjs'; h.$('feed').onchange(); h.proceed();
   assert.equal(h.ms.metadata, null, 'changing feed stops and releases');
   h.$('connect').click(); await flush();
   assert.equal(h.ms.metadata.title, 'WSJS · Duke affiliate');
   assert.deepEqual(h.meta().art, [TEAM_ART('duke')], 'an affiliate keeps the selected school\'s image');
+  h.$('feed').value = 'duke-varsity'; h.$('feed').onchange(); h.proceed(); h.$('connect').click(); await flush();
+  assert.deepEqual(h.meta(), { title: 'Duke Sports Network · backup', artist: 'Homecall · Listen · Duke Sports Network · backup', album: 'Duke Sports Network · backup', art: [TEAM_ART('duke')] }, 'network backup is distinct from its primary and affiliate');
   for (const [key, title] of [['miami', '104.3 WQAM'], ['vt', 'Virginia Tech Sports Network']]) {
     h.$('team').value = key; h.$('team').onchange(); h.proceed(); h.$('connect').click(); await flush(); h.player.update(PLAYING); await flush();
-    assert.equal(h.ms.metadata.title, title); assert.equal(h.ms.metadata.artist, 'Homecall · Radio stations');
+    assert.equal(h.ms.metadata.title, title); assert.equal(h.ms.metadata.artist, `Homecall · Listen · ${title}`);
+    assert.equal(h.ms.metadata.album, title);
     assert.deepEqual(h.meta().art, [TEAM_ART(key)], key);
   }
   h.$('demo').click(); await flush();
@@ -254,7 +257,7 @@ test('AC16 a game-feed fallback publishes the actual network identity without a 
   h.player.failNext = true; h.$('connect').click();
   assert.equal(h.ms.metadata.title, 'Duke vs Tulane', 'the game feed was claimed when it started');
   await flush();
-  assert.deepEqual(h.meta(), { title: 'Duke Sports Network', artist: 'Homecall · Radio stations', album: 'Duke', art: [TEAM_ART('duke')] });
+  assert.deepEqual(h.meta(), { title: 'Duke Sports Network', artist: 'Homecall · Listen · Duke Sports Network', album: 'Duke Sports Network', art: [TEAM_ART('duke')] });
   h.player.update(PLAYING);
   for (let i = 0; i < 20; i++) h.tick();
   await flush();
