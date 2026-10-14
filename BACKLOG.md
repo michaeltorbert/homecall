@@ -210,7 +210,18 @@ Limited exceptions for #12 and #19 (intermediate; none closes an issue or is a p
 
 ## Tooling dependency assessment
 
-- **TOOLING-DEPENDENCY-01 (assessment needed)**: The October 14, 2026 `npm audit` snapshot reports advisories involving `miniflare`, `sharp`, `source-map-js`, `undici` and `wrangler`. Exploitability and whether affected paths ship or run only in local/build tooling are not assessed. Map each advisory to supported runtime/build paths, then evaluate compatible supported fixes and run the relevant Worker/build checks. Do not use blind `npm audit fix --force` or a major downgrade. Keep implementation and dependency changes scoped to that follow-up.
+- **TOOLING-DEPENDENCY-01 (implemented; resolved on merge after CI and independent review pass)**: The October 14, 2026 `npm audit` snapshot reported advisories involving `miniflare`, `sharp`, `source-map-js`, `undici` and `wrangler`. The source imports and the bundle comparison show these packages are used only for building, tests, the local Worker harness and deployment. None ships in the browser app or the deployed Worker. No production exploitability is demonstrated. Fixed versions and validation are in [DEPENDENCIES.md](DEPENDENCIES.md). CI and an independent review are still required before merge. Policy: no blind `npm audit fix --force`, no major downgrade.
+  - **Assessment and fix (October 14, 2026):** [DEPENDENCIES.md](DEPENDENCIES.md) maps each advisory. None is imported by browser or Worker code. `source-map-js` runs only during the build and tests. `miniflare`, `sharp`, `undici` and `wrangler` are local Worker test/dev/deploy tooling. The fix pins `wrangler` 4.151.0 and `miniflare` 5.20261012.0-beta (giving `sharp` 0.35.5 and `undici` 7.29.1), and refreshes `source-map-js` to 1.2.2 within existing ranges. The new Miniflare rejects the old per-worker `type` key, so `scripts/test-worker.mjs` drops it from its four worker configs. No assertion changes. Local validation passed:
+
+    - clean install with a stable lock;
+    - audit, all dependencies and `--omit=dev`: 0;
+    - 546 unit tests;
+    - production build and private checks;
+    - default, preview and local dry-runs;
+    - Worker integration, with the same 20 checks under workerd 1.20261012.1;
+    - Worker bundle byte-identical to the baseline.
+
+    The pull-request CI run and a fresh independent review are merge gates; their results are recorded outside this file. There is no Worker redeploy, and no phone, live or native acceptance claim.
 
 ## Unified Listen (issue #30; release candidate; physical-device checks accepted after release)
 
