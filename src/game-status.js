@@ -1,7 +1,8 @@
 import { createTimingFreshness, nextPollDelay } from './timing-freshness.js';
 import { schoolKey, footballSeason, matchEvent, clockSeconds } from './sync-mapping.js';
-// Source-reported game status for option labels only. No audio, player, timing-source,
-// calibration or selection dependency: a status update can only change label text.
+// Source-reported game status for option labels. No audio, player, timing-source or calibration
+// dependency: a status update can only change label text. The one exception is initial(), a one-shot
+// read of structured fresh states that Listen may use once, before it picks a default game.
 export const STATUS_LABELS = Object.freeze({ live: 'LIVE', upcoming: 'Upcoming', completed: 'Completed', unavailable: 'Status unavailable' });
 export const STATUS_TIMEOUT_MS = 10000;
 export const MAX_STATUS_SEASONS = 2;
@@ -62,19 +63,27 @@ export function gameStatuses(games, school, snapshots) {
 }
 export function createGameStatus({ read, onUpdate, enabled = () => true, clock, timeout = ms => AbortSignal.timeout(ms), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = timer => clearTimeout(timer) }) {
   let generation = 0, catalog = null, seasons = new Map(), run = null, teams = null, teamsRequest = null, lifecycle = 0, published = '';
-  function publish(force = false) {
-    if (!catalog) return;
+  // Seasons whose first poll of this catalog has not settled, and callers waiting on that first round.
+  let firstRound = new Set(), waiters = [];
+  function states() {
+    if (!catalog) return new Map();
     const fresh = new Map();
     for (const entry of seasons.values()) if (entry.events && entry.freshness.fresh()) fresh.set(entry.season, entry);
-    const labels = new Map([...gameStatuses(catalog.games, catalog.school, fresh)].map(([id, state]) => [id, STATUS_LABELS[state]]));
+    return gameStatuses(catalog.games, catalog.school, fresh);
+  }
+  function publish(force = false) {
+    if (!catalog) return;
+    const labels = new Map([...states()].map(([id, state]) => [id, STATUS_LABELS[state]]));
     const key = JSON.stringify([...labels]);
     if (!force && key === published) return;
     published = key;
     try { onUpdate(labels); } catch { /* Labels cannot affect playback or the catalog. */ }
   }
+  function settle() { const done = waiters; waiters = []; for (const waiter of done) waiter(); }
   function halt() {
     generation++; run?.abort(); run = null; teamsRequest = null;
     for (const entry of seasons.values()) { clearTimer(entry.timer); entry.timer = null; entry.events = null; entry.freshness.invalidate(); }
+    settle();
   }
   // Abort-insensitive reads still end the poll when its signal does.
   const bounded = (promise, signal) => new Promise((resolve, reject) => {
@@ -122,6 +131,8 @@ export function createGameStatus({ read, onUpdate, enabled = () => true, clock, 
       entry.events = null; entry.freshness.invalidate();
     }
     publish();
+    firstRound.delete(entry.season);
+    if (!firstRound.size) settle();
     // The next poll is scheduled from completion; requests never overlap per season.
     entry.delay = success ? 15000 : nextPollDelay(entry.delay, false);
     entry.timer = setTimer(() => void poll(entry, gen, runSignal), entry.delay);
@@ -136,7 +147,19 @@ export function createGameStatus({ read, onUpdate, enabled = () => true, clock, 
       halt();
       catalog = { games: games.map(({ id, start, opponent }) => ({ id, start, opponent })), teamId, school };
       seasons = new Map(statusSeasons(catalog.games).map(season => [season, { season, freshness: createTimingFreshness({ clock }), events: null, providerId: null, timer: null, delay: 15000 }]));
+      firstRound = new Set(seasons.keys());
       publish(true); start();
+    },
+    // Structured fresh states (live, upcoming, completed, unavailable) once the first poll of every
+    // season has settled. Never rejects. Resolves at once when nothing is polling (no catalog, no
+    // season, hidden or disabled) and early, with what is fresh then, on halt or when signal aborts.
+    // Later polls never resolve it again: this cannot drive any selection after the first round.
+    initial(signal) {
+      return new Promise(resolve => {
+        const done = () => { signal?.removeEventListener('abort', done); resolve(states()); };
+        if (!run || !firstRound.size || signal?.aborted) { done(); return; }
+        waiters.push(done); signal?.addEventListener('abort', done, { once: true });
+      });
     },
     clear() { halt(); publish(); catalog = null; seasons = new Map(); published = ''; },
     suspend() { halt(); publish(); },

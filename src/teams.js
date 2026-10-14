@@ -9,9 +9,10 @@ export const teams = {
 };
 // Catalog-only schools: reachable through their published game feeds, with no network fallback and no
 // configured official player link. Other schools the catalog lists are reachable by their catalog ID.
+// label is picker text only; name stays the identity.
 export const catalogTeams = {
   auburn: { name: 'Auburn', catalogId: 'ffacbef1-e8a5-4872-9401-eff97cdf2c9c' },
-  uva: { name: 'Virginia', catalogId: 'b3c33c46-a9e4-4e3b-9d5a-4fefb625f14c' },
+  uva: { name: 'Virginia', label: 'Virginia (UVA)', catalogId: 'b3c33c46-a9e4-4e3b-9d5a-4fefb625f14c' },
 };
 
 // These affiliates carried Duke postgame in audio samples on 2026-09-12.

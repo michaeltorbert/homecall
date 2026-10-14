@@ -1,5 +1,6 @@
 import { metadataURL, mediaURL } from './gateway.js';
 import { readJSON, checkPlaylist } from './homestream.js';
+import { defaultGame } from './game-choice.js';
 const messages = {
   unpublished: 'This game’s feed has not been published. Refresh closer to the broadcast.',
   missing: 'The published feed is unavailable (404). It may not have started or may have ended.',
@@ -9,34 +10,76 @@ const messages = {
   catalog: 'The game catalog could not load. Refresh to retry. This host needs the Homecall catalog service.',
   ready: 'Live playlist confirmed. Press Play, then match the audio to your TV.'
 };
+// Why the Game choice is left neutral. Absence is claimed only when every listed game is freshly Completed.
+const choose = {
+  ambiguous: school => `More than one ${school} game is reported LIVE. Choose a game.`,
+  none: school => `No live or upcoming ${school} games are listed. Choose a past game to check its feed.`,
+  unconfirmed: school => `No live or upcoming ${school} game could be confirmed. Choose a listed game.`,
+  missing: () => 'The game you chose is no longer listed. Choose a listed game.',
+  manual: () => 'Choose a game to check its feed.'
+};
+const UNCERTAIN = 'Live status could not be confirmed for the most recent game.';
+// The default game waits at most this long for the first status round.
+const INITIAL_WAIT_MS = 4000;
 // onGames/onCatalogInvalidated are optional label hooks; they never affect readiness or playback.
 // guard(kind, proceed, revert) lets the owner confirm a user's game change or refresh before it
 // stops playback; revert puts back the committed game while the prompt is pending.
 // teamId, when it returns an ID, matches the catalog team by that explicit ID instead of its name.
 // onChange receives 'refresh' or 'game' so the owner can tell a reload from a new game choice.
-export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidated, guard = (_kind, proceed) => proceed(), read = readJSON, probe = checkPlaylist, prefix = '', school = () => 'Georgia Tech', teamId = () => null }) {
+// Default game: when a school is enabled with no game committed for it on this page, one bounded
+// statuses(signal) round (structured fresh states) feeds defaultGame. epoch and idle let the owner
+// veto it: the choice commits only if epoch() is unchanged since the load began and idle() holds.
+// Otherwise it is retired for good. Committing a default never calls onChange.
+export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidated, guard = (_kind, proceed) => proceed(), read = readJSON, probe = checkPlaylist, prefix = '', school = () => 'Georgia Tech', teamId = () => null,
+  statuses = null, epoch = () => 0, idle = () => true }) {
   const api = path => metadataURL(path, document.baseURI, typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', { allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
   const $ = id => document.getElementById(prefix + id);
   // idle (disabled), loading, checking, ready or unavailable: what the owner may say before Play.
-  let controller, games = [], ready = null, enabled = false, committed = '', status = 'idle';
+  // committed is the selected game of the catalog team committedTeam; it never carries to another team.
+  let controller, games = [], ready = null, enabled = false, committed = '', committedTeam = null, status = 'idle', caution = '';
   const baseLabels = new WeakMap();
   const cancel = () => { controller?.abort(); controller = null; ready = null; };
   const invalidate = () => { try { onCatalogInvalidated?.(); } catch { /* Optional labels cannot block the catalog. */ } };
   // Readiness is unknown from the moment a reload or game change begins, before the owner re-renders.
   const begin = kind => { cancel(); status = 'loading'; onChange(kind); controller = new AbortController(); return controller.signal; };
+  const note = text => { $('game-note').textContent = caution ? `${caution} ${text}` : text; };
+  // A disabled, value-less first option keeps the Game choice neutral; a choice removes it.
+  function placeholder(text) {
+    let option = $('game').querySelector('option[value=""]');
+    if (!option) { option = document.createElement('option'); option.value = ''; option.disabled = true; $('game').prepend(option); }
+    option.textContent = text; $('game').value = '';
+  }
+  const unplace = () => { $('game').querySelector('option[value=""]')?.remove(); };
+  function neutral(text) { placeholder('Choose a game'); committed = ''; status = 'unavailable'; $('game-note').textContent = text; onReady(); }
+  // Copies the hook's id -> state entries into a local Map by iteration, never by a realm-bound type
+  // check; anything that is not entries reads as no status.
+  const statesOf = value => { try { return new Map(value ?? []); } catch { return new Map(); } };
+  // The first status round, bounded by INITIAL_WAIT_MS and the load signal even when the hook ignores both.
+  // The deadline and an abort settle with no status.
+  function firstStatuses(signal) {
+    if (!statuses) return Promise.resolve(new Map());
+    return new Promise(resolve => {
+      const finish = value => { clearTimeout(timer); signal.removeEventListener('abort', stop); resolve(statesOf(value)); };
+      const stop = () => finish();
+      const timer = setTimeout(stop, INITIAL_WAIT_MS);
+      signal.addEventListener('abort', stop, { once: true });
+      Promise.resolve().then(() => statuses(signal)).then(finish, stop);
+    });
+  }
   async function check(game, signal) {
     status = game?.url ? 'checking' : 'unavailable';
-    $('game-note').textContent = game?.url ? 'Checking that the live playlist is advancing…' : messages.unpublished;
+    note(game?.url ? 'Checking that the live playlist is advancing…' : messages.unpublished);
     const result = game?.url ? await probe(game.url, { signal }) : 'unpublished';
     if (signal.aborted) return;
     ready = result === 'ready' ? game : null; status = ready ? 'ready' : 'unavailable';
-    $('game-note').textContent = messages[result] || messages.unavailable;
+    note(messages[result] || messages.unavailable);
     onReady();
   }
-  async function refresh() {
+  // initial: a team was enabled, so a default may be chosen. An explicit refresh only keeps a choice.
+  async function load(initial) {
     if (!enabled) return;
-    const previous = $('game').value, signal = begin('refresh');
-    invalidate(); status = 'loading';
+    const signal = begin('refresh'), owner = epoch();
+    invalidate(); status = 'loading'; caution = '';
     games = []; $('game').replaceChildren();
     $('game').disabled = true; $('game-refresh').disabled = true;
     $('game-note').textContent = `Loading ${school()} games…`;
@@ -56,7 +99,9 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
         if (game.url !== null && !url) throw Error('catalog-invalid');
         return { ...game, url };
       });
-      const current = games.find(g => g.id === previous) || [...games].filter(g => g.start !== null).sort((a,b) => Math.abs(a.start-Date.now())-Math.abs(b.start-Date.now()))[0] || games[0];
+      // Only this team's own committed game is kept; a shared game ID under another school is not.
+      const kept = committedTeam === team.id ? committed : '';
+      committed = ''; committedTeam = team.id;
       $('game').replaceChildren();
       for (const g of games) {
         const option = document.createElement('option'); option.value = g.id;
@@ -64,9 +109,27 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
         baseLabels.set(option, option.textContent);
         $('game').append(option);
       }
-      if (!current) { status = 'unavailable'; $('game-note').textContent = `No ${school()} football games are listed. Refresh later.`; onReady(); return; }
-      $('game').value = committed = current.id;
+      if (!games.length) { status = 'unavailable'; $('game-note').textContent = `No ${school()} football games are listed. Refresh later.`; onReady(); return; }
+      const retained = games.find(g => g.id === kept);
+      if (retained) $('game').value = committed = retained.id;
+      else placeholder(initial && !kept ? 'Finding the live or next game…' : 'Choose a game');
       try { onGames?.(games.map(({id, opponent, start}) => ({id, opponent, start})), {teamId: team.id}); } catch { /* Labels are optional. */ }
+      // A kept choice, including a past or unpublished game, is probed without any status wait.
+      if (retained) { await check(retained, signal); return; }
+      if (kept) { neutral(choose.missing()); return; }
+      if (!initial) { neutral(choose.manual()); return; }
+      // A manual game choice stays open during the wait; it cancels this load and retires the default.
+      $('game').disabled = false;
+      $('game-note').textContent = `Finding the live or next ${school()} game…`;
+      const fresh = await firstStatuses(signal);
+      if (signal.aborted) return;
+      // Any listener action or listening intent since the load began retires the default for good.
+      if (epoch() !== owner || !idle()) { neutral(choose.manual()); return; }
+      const choice = defaultGame(games, fresh);
+      const current = games.find(g => g.id === choice.id);
+      if (!current) { neutral(choose[choice.reason]?.(school()) ?? choose.manual()); return; }
+      unplace(); $('game').value = committed = current.id;
+      caution = choice.uncertain ? UNCERTAIN : '';
       await check(current, signal);
     } catch {
       if (!signal.aborted) { status = 'unavailable'; $('game-note').textContent = messages.catalog; onReady(); }
@@ -75,8 +138,9 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
     }
   }
   async function change(id) {
-    committed = id;
+    committed = id; caution = '';
     const signal = begin('game');
+    unplace(); $('game-refresh').disabled = false;
     try { await check(games.find(g => g.id === id), signal); }
     catch { /* An obsolete selection was canceled. */ }
   }
@@ -84,17 +148,19 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
     const next = $('game').value;
     return guard('game', () => {
       // A refresh while the prompt was open may have withdrawn the requested game.
-      if (![...$('game').options].some(option => option.value === next)) return;
+      // The neutral placeholder is never a game.
+      if (!games.some(g => g.id === next)) return;
       $('game').value = next;
       return change(next);
     }, () => { $('game').value = committed; });
   };
+  const refresh = () => load(false);
   $('game-refresh').onclick = () => guard('refresh', refresh);
   return {
     get ready() { return ready; },
     get status() { return status; },
     refresh,
-    setEnabled(value) { enabled = value; cancel(); invalidate(); status = 'idle'; $('game-panel').hidden = !value; if (value) refresh(); },
+    setEnabled(value) { enabled = value; cancel(); invalidate(); status = 'idle'; $('game-panel').hidden = !value; if (value) load(true); },
     stop() { controller?.abort(); controller = null; if (status === 'loading' || status === 'checking') status = 'unavailable'; $('game').disabled = !games.length; $('game-refresh').disabled = false; },
     // Text only: value, order, selection, disabled state, focus and readiness are untouched.
     relabel(labels) {
