@@ -16,6 +16,12 @@
   --muted: #a8afb9;
   --line: #30353e;
   --field-line: #3a404a;
+  /* Fixed for every school: text-entry and select boundaries (3:1) and placeholder text (4.5:1) on every B plane. */
+  --field-edge: #6e7889;
+  --placeholder: #858d99;
+  /* Fixed range track (3:1 on every plane) and thumb ring (3:1 against the track); the thumb center keeps the accent. */
+  --range-track: #6e7889;
+  --range-thumb-edge: #eceff3;
   --surface: #1b1f26;
   --surface-hover: #252b36;
   --neutral-fill: #c6ccd6;
@@ -114,7 +120,7 @@ select, input:not([type=range]), textarea {
   width: 100%;
   min-width: 0;
   min-height: 44px;
-  border: 1px solid var(--field-line);
+  border: 1px solid var(--field-edge);
   border-radius: 8px;
   background: var(--surface);
   padding: 10px 12px;
@@ -122,8 +128,10 @@ select, input:not([type=range]), textarea {
 }
 select { padding-right: 22px; text-overflow: ellipsis; }
 select:disabled, input:disabled:not([type=range]) { opacity: 0.55; cursor: default; }
-::placeholder { color: #7d8591; opacity: 1; }
+::placeholder { color: var(--placeholder); opacity: 1; }
 input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   min-width: 0;
   min-height: 44px;
@@ -133,6 +141,22 @@ input[type=range] {
   cursor: pointer;
   touch-action: pan-y;
 }
+/* The native input keeps its values, keyboard, focus and 44px target; only the track and thumb are drawn here.
+   Engine pseudo-elements stay in separate rules, since one unknown selector drops a whole rule. */
+input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--range-track); }
+input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--range-track); }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin-top: -7px;
+  border: 2px solid var(--range-thumb-edge);
+  border-radius: 50%;
+  background: var(--accent-range);
+}
+input[type=range]::-moz-range-thumb { box-sizing: border-box; width: 20px; height: 20px; border: 2px solid var(--range-thumb-edge); border-radius: 50%; background: var(--accent-range); }
 input[type=range]:disabled { cursor: default; opacity: 0.5; }
 textarea { display: block; resize: vertical; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 audio { display: block; width: 100%; max-width: 100%; margin: 4px 0 18px; }
