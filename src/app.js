@@ -22,10 +22,12 @@ let storage;
 try { storage = localStorage; } catch { /* Private browsing may deny access. */ }
 const memory = new PlaybackMemory(storage, text => { $('storage-warning').textContent = text; });
 let liveKey = null, savedDelay = null, sourcePaused = false;
-// Every configured team plus every school the catalog lists (added once the catalog answers).
+// Every configured school from the start; other schools the catalog lists join once it answers.
 let teamList = listenTeams(), teamsLoaded = false;
+// Only a configured school is saved or restored, never a catalog:<id> school.
+const configured = new Set(teamList.keys());
 let selected = 'duke';
-try { if (teams[storage?.getItem('mystream.team')]) selected = storage.getItem('mystream.team'); } catch {}
+try { const saved = storage?.getItem('mystream.team'); if (configured.has(saved)) selected = saved; } catch {}
 let resetSourceDelay = false;
 let state = null, connecting = false, active = false, scrubbing = false, generation = 0, demo = null, pending = 0, specialPending = false;
 let previewText = '', previewId = '', needsCheck = true, sourceStatus = 'Stopped', attention = false;
@@ -111,6 +113,10 @@ const gameStatus = createGameStatus({ read: metadata, enabled: () => document.vi
 // The committed school's next network broadcast. It writes only its own line; never audio, catalog or status.
 const countdown = createBroadcastCountdown({ read: metadata, el: $('broadcast-next'), enabled: () => document.visibilityState !== 'hidden' });
 const catalog = setupHomestream({ guard: liveGuard, school: () => currentTeam().name, teamId: () => currentTeam().catalogId,
+  // One bounded status round may pick the default game, never later polls. Every Play, Stop, team,
+  // source, game or Recordings takeover advances generation (stopPhysical), which retires that choice,
+  // and so does any listening intent, including a paused, denied or fallback one waiting on Play.
+  statuses: signal => gameStatus.initial(signal), epoch: () => generation, idle: () => !session.intent && !active && !connecting,
   // A game change ends the intent and returns Source to Automatic; a reload ends the intent only.
   onChange: kind => { disconnect(); if (kind === 'game') session.setMode('auto'); resetAlignment(); render(); },
   onReady: () => { showSource(); render(); },
@@ -267,7 +273,7 @@ function render() {
 }
 function showSource() {
   const team = currentTeam(), r = resolution(), source = shown();
-  if (!active && !connecting) $('station').textContent = source?.title ?? team.name;
+  if (!active && !connecting) $('station').textContent = source?.title ?? team.label;
   $('source-note').textContent = source?.kind === 'game' ? 'Published game feed. Availability is checked before Play. When the feed carries broadcast timestamps, Match my TV can find a recorded play; delay controls work either way.'
     : source?.kind === 'affiliate' ? `${team.name} affiliate station. Game and postgame coverage can change; check that you hear the broadcast you want.`
     : source?.note ? source.note
@@ -287,7 +293,7 @@ function rebuildSources() {
 function teamChanged() {
   disconnect(); selected = $('team').value;
   session.setMode('auto'); resetSourceDelay = false; resetAlignment();
-  if (teams[selected]) try { storage?.setItem('mystream.team', selected); } catch {}
+  if (configured.has(selected)) try { storage?.setItem('mystream.team', selected); } catch {}
   catalog.setEnabled(!!currentTeam().catalogId);
   rebuildSources(); showSource(); notice(''); render();
   countdown.setSchool(selected);
@@ -532,15 +538,20 @@ function preview() {
   } else $('log-summary').textContent = 'Start a listening session to create a log.';
   render();
 }
-// Schools listed only by the catalog join the Team choice by explicit ID once the catalog answers.
+// Appends a Team option for every listed school that lacks one; existing options, the selection and
+// focus are untouched.
+function addTeamOptions() {
+  const known = new Set([...$('team').options].map(option => option.value));
+  for (const team of teamList.values()) if (!known.has(team.key)) { const option = document.createElement('option'); option.value = team.key; option.textContent = team.label; $('team').append(option); }
+}
+// Other schools the catalog lists join the Team choice by explicit ID once the catalog answers.
 async function loadTeams() {
   try {
     const list = await metadata('homestream/teams');
     teamList = listenTeams(list); teamsLoaded = true;
-    const known = new Set([...$('team').options].map(option => option.value));
-    for (const team of teamList.values()) if (!known.has(team.key)) { const option = document.createElement('option'); option.value = team.key; option.textContent = team.name; $('team').append(option); }
+    addTeamOptions();
     render();
-  } catch { /* Configured teams keep working; catalog-only schools appear once the list loads. */ }
+  } catch { /* Every configured school stays listed; its game note explains a catalog failure. */ }
 }
 // A team or source change stops an active session. The select keeps the committed choice until
 // Continue, so Cancel leaves audio, buffer, log and stored delay untouched.
@@ -550,7 +561,7 @@ $('feed').onchange = () => {
   $('feed').value = session.mode;
   ask.ask({ title: 'Change source?', text: 'Audio stops. The new source starts at 0 seconds; check alignment again.', action: 'Change source' }, () => { $('feed').value = next; sourceChanged(); });
 };
-$('team').value = selected;
+addTeamOptions(); $('team').value = selected;
 $('team').onchange = () => {
   const next = $('team').value;
   if (!active && !connecting) return teamChanged();

@@ -264,6 +264,62 @@ test('inactive or hidden controllers label without polling until enabled', async
   enabled = true; h.status.resume(); await flush();
   assert.equal(h.labels().g2, 'Upcoming');
 });
+// initial(): one structured read for the default game (issue #39); labels keep their own contract.
+const plainStates = map => Object.fromEntries(map);
+const settled = promise => { let done = false, value; promise.then(v => { done = true; value = v; }); return () => (done ? value : undefined); };
+test('initial() resolves once with structured fresh states after every season\'s first poll; later polls never resolve it again', async () => {
+  const gates = new Map();
+  const h = harness({ read: (path, options) => path.startsWith('sync/status/') ? (gates.set(path, deferred()), gates.get(path).promise) : table(standard)(path, options) });
+  h.status.setGames({ games: [G1, G2, G3, G5], teamId: DUKE, school: 'Duke' });
+  const first = settled(h.status.initial()); await flush();
+  assert.equal(first(), undefined, 'waits for both seasons');
+  gates.get('sync/status/150/2026').resolve(standard['sync/status/150/2026']); await flush();
+  assert.equal(first(), undefined, 'one season is not the first round');
+  gates.get('sync/status/150/2025').resolve(standard['sync/status/150/2025']); await flush();
+  assert.deepEqual(plainStates(first()), { g1: 'completed', g2: 'upcoming', g3: 'unavailable', g5: 'live' }, 'states, never label text; a null start is never matched');
+  assert.deepEqual(h.labels(), { g1: 'Completed', g2: 'Upcoming', g3: UNAVAILABLE, g5: 'LIVE' }, 'labels are unchanged');
+  const later = settled(h.status.initial()); await flush();
+  assert.deepEqual(plainStates(later()), plainStates(first()), 'after the first round a caller reads the current states at once');
+});
+test('initial() fails closed: stale, failed, unknown or ambiguous evidence reads unavailable', async () => {
+  for (const [name, responses] of [['stale', { ...standard, 'sync/status/150/2026': envelope(2026, [ev('102', G2, 'live')], { ageMs: 45000 }) }],
+    ['failed', { ...standard, 'sync/status/150/2026': Error('502') }], ['unknown', { ...standard, 'sync/status/150/2026': envelope(2026, [ev('102', G2, 'unknown')]) }],
+    ['ambiguous', { ...standard, 'sync/status/150/2026': envelope(2026, [ev('102', G2, 'live'), ev('103', G2, 'live', { start: G2.start + 3600 * 1000 })]) }]]) {
+    const h = harness({ read: table(responses) });
+    h.status.setGames({ games: [G2], teamId: DUKE, school: 'Duke' });
+    const result = settled(h.status.initial()); await flush();
+    assert.deepEqual(plainStates(result()), { g2: 'unavailable' }, name);
+  }
+});
+test('initial() settles promptly with no season, no catalog, a hidden controller, halt or caller abort; a hanging read keeps it pending for the caller to bound', async () => {
+  const none = harness({ read: table(standard) });
+  assert.deepEqual(plainStates(await none.status.initial()), {}, 'no catalog');
+  none.status.setGames({ games: [G3], teamId: DUKE, school: 'Duke' });
+  assert.deepEqual(plainStates(await none.status.initial()), { g3: 'unavailable' }, 'no season to poll');
+  const hidden = harness({ read: table(standard), enabled: () => false });
+  hidden.status.setGames({ games: [G2], teamId: DUKE, school: 'Duke' });
+  assert.deepEqual(plainStates(await hidden.status.initial()), { g2: 'unavailable' }); assert.equal(hidden.calls.length, 0);
+  for (const end of ['suspend', 'clear', 'setGames', 'abort']) {
+    const h = harness({ read: (path, options) => path.startsWith('sync/status/') ? new Promise(() => {}) : table(standard)(path, options) });
+    h.status.setGames({ games: [G2], teamId: DUKE, school: 'Duke' });
+    const controller = new AbortController(), result = settled(h.status.initial(controller.signal)); await flush();
+    assert.equal(result(), undefined, `${end}: an abort-insensitive read leaves it pending`);
+    if (end === 'abort') controller.abort(); else if (end === 'setGames') h.status.setGames({ games: [G1], teamId: DUKE, school: 'Duke' }); else h.status[end]();
+    await flush();
+    assert.ok(result() instanceof Map, end); assert.ok([...result().values()].every(s => s === 'unavailable'), end);
+  }
+  const aborted = new AbortController(); aborted.abort();
+  const h = harness({ read: table(standard) }); h.status.setGames({ games: [G2], teamId: DUKE, school: 'Duke' });
+  assert.deepEqual(plainStates(await h.status.initial(aborted.signal)), { g2: 'unavailable' }, 'an already-aborted caller is answered at once');
+});
+test('initial() also settles when a hanging first poll reaches its own deadline', async () => {
+  const h = harness({ read: (path, options) => path.startsWith('sync/status/') ? new Promise(() => {}) : table(standard)(path, options) });
+  h.status.setGames({ games: [G2], teamId: DUKE, school: 'Duke' });
+  const result = settled(h.status.initial()); await flush();
+  assert.equal(result(), undefined);
+  h.timeouts.at(-1).abort(new DOMException('deadline', 'TimeoutError')); await flush();
+  assert.deepEqual(plainStates(result()), { g2: 'unavailable' }); assert.deepEqual(h.pending().map(t => t.ms), [30000]);
+});
 test('a throwing label consumer cannot stop polling', async () => {
   const h = harness({ read: table(standard), onUpdate: () => { throw Error('render'); } });
   h.status.setGames({ games: [G2], teamId: DUKE, school: 'Duke' }); await flush();

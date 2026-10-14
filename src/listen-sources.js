@@ -4,16 +4,20 @@ import { teams, catalogTeams, getSources, gameSourceId } from './teams.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CHECKING = new Set(['idle', 'loading', 'checking']);
 
-// Every radio team plus every school the catalog lists, joined only by explicit catalog ID. A listed
-// school without configuration stays reachable under catalog:<id> with its catalog name.
+// Every configured school (radio teams, then catalog-only schools) whether or not the catalog answers,
+// plus every other school the catalog lists, joined only by explicit catalog ID. An unconfigured listed
+// school stays reachable under catalog:<id> with its catalog name. name is the identity used by status
+// matching, artwork and logs; label is picker text only (Virginia (UVA) beside Virginia Tech).
 export function listenTeams(catalogList = []) {
-  const list = new Map(Object.entries(teams).map(([key, team]) => [key, { key, name: team.name, catalogId: team.catalogId ?? null, radio: !team.discovery }]));
-  const known = new Map([...Object.entries(teams), ...Object.entries(catalogTeams)].filter(([, team]) => team.catalogId).map(([key, team]) => [team.catalogId, key]));
+  const list = new Map([...Object.entries(teams), ...Object.entries(catalogTeams)].map(([key, team]) =>
+    [key, { key, name: team.name, label: team.label ?? team.name, catalogId: team.catalogId ?? null, radio: !!teams[key] && !team.discovery }]));
+  const known = new Map([...list.values()].filter(team => team.catalogId).map(team => [team.catalogId, team.key]));
   for (const entry of Array.isArray(catalogList) ? catalogList : []) {
     if (typeof entry?.id !== 'string' || !UUID.test(entry.id) || typeof entry.name !== 'string' || !entry.name.trim()) continue;
     const key = known.get(entry.id) ?? `catalog:${entry.id}`;
     if (list.has(key)) continue;
-    list.set(key, { key, name: catalogTeams[key]?.name ?? entry.name.trim().slice(0, 60), catalogId: entry.id, radio: false });
+    const name = entry.name.trim().slice(0, 60);
+    list.set(key, { key, name, label: name, catalogId: entry.id, radio: false });
   }
   return list;
 }

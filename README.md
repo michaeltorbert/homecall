@@ -21,7 +21,8 @@ The network backup is the private alternate address published by [Varsity's Duke
 
 Listen is the only live player. **More → Radio stations** and **More → Game broadcasts** open it at the team or game choice.
 
-- **Teams.** Every configured team, plus every school the game catalog lists, joined by explicit catalog ID. Auburn and Virginia appear once the catalog answers. Virginia Tech has no catalog identity, so it never resolves to Virginia.
+- **Teams (issue #31).** The Team choice lists all six configured schools from the first render, whether or not the game catalog answers: Duke, Miami, Virginia Tech, Georgia Tech, Auburn and Virginia (UVA). Other schools the catalog lists are appended by explicit catalog ID without changing the selection. "Virginia (UVA)" is display text only; the school's identity name stays Virginia. Virginia Tech has no catalog identity, so it never resolves to Virginia. A school with nothing to play stays listed and its game note or Source line says why. Any configured school is remembered on this browser; a game is never saved.
+- **Default game (issue #39).** When a school is opened and no game has been chosen for it on this page, Listen waits up to 4 seconds for the first status round. It then selects the only game the sports-data source freshly reports LIVE, otherwise the earliest future kickoff not reported Completed. Several LIVE games, or no live or future game, leave a neutral "Choose a game". "No live or upcoming games are listed" appears only when every listed game is past and freshly Completed; otherwise the note says nothing could be confirmed. When the most recent started game has no confirmed status, the next-game note says so. Kickoff time only orders games; it never means LIVE and is not the broadcast start. Selecting a default never starts audio, changes Source or stops anything. Any Play, Stop, team, source, game or Recordings action, and any listening intent, retires the pending default for good. A chosen game, including a past one, is kept on Refresh and reconnect; if it disappears the note says so and no other game is substituted. Later status polls change labels only.
 - **Order.** Candidates are tried in this order:
   1. The selected game's published feed, once its playlist is confirmed advancing.
   2. The network.
@@ -181,7 +182,9 @@ all count. Unknown age, a failed or slow refresh, or a clock step shows
 seasons, and ambiguous matches, including two catalog games that claim the same
 event. Hiding the tab or leaving Sync stops polling. Status updates change only
 the option text; they never start, stop or reload audio, change the selected
-game, or touch calibration, timing source or play anchors. LIVE means the
+game, or touch calibration, timing source or play anchors. The one exception is
+the first status round after a school opens, which may pick Listen's default game
+once (see Unified Listen). LIVE means the
 sports-data source reports the game in progress. It can lag the actual game, and
 it does not mean a feed is published or playable.
 

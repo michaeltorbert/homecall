@@ -18,7 +18,7 @@ test('index keeps every controller ID once, the signed control sets and no third
   const { doc } = page(t);
   const ids = [...doc.querySelectorAll('[id]')].map(el => el.id);
   assert.equal(new Set(ids).size, ids.length, 'IDs are unique');
-  for (const id of ['team', 'feed', 'feed-picker', 'game-panel', 'game', 'game-note', 'game-refresh', 'station', 'status', 'notice', 'connect', 'pause', 'stop', 'resume-position',
+  for (const id of ['team', 'team-help', 'feed', 'feed-picker', 'game-panel', 'game', 'game-note', 'game-refresh', 'station', 'status', 'notice', 'connect', 'pause', 'stop', 'resume-position',
     'volume', 'hold', 'cancel', 'confirm', 'live', 'scrub', 'scrub-label', 'delay', 'buffer', 'alignment', 'sync-help', 'official', 'source-note', 'demo', 'provider', 'output', 'reason',
     'storage-warning', 'sessions', 'preview', 'log-summary', 'export', 'share', 'copy', 'download', 'share-status', 'clear', 'clear-confirm', 'build',
     'source-current', 'switch-notice', 'recover-note', 'game-status-help', 'timing-tools',
@@ -42,6 +42,14 @@ test('index keeps every controller ID once, the signed control sets and no third
   for (const warning of ['storage-warning']) assert.equal(doc.getElementById(warning).closest('dialog, details, [role=menu]'), null, 'critical warnings live outside closed tools');
 });
 
+test('the always-visible Team choice lists every configured school before any script runs, Virginia Tech apart from Virginia (UVA)', t => {
+  const { doc, $ } = page(t);
+  assert.deepEqual([...$('team').options].map(o => [o.value, o.textContent]),
+    [['duke', 'Duke'], ['miami', 'Miami'], ['vt', 'Virginia Tech'], ['gt', 'Georgia Tech'], ['auburn', 'Auburn'], ['uva', 'Virginia (UVA)']]);
+  assert.equal($('team').closest('[hidden], dialog, [role=menu], details'), null, 'reachable without the menu');
+  assert.equal(doc.querySelector('label[for=team]').textContent, 'Team');
+  assert.equal($('team').getAttribute('aria-describedby'), 'team-help'); assert.match($('team-help').textContent, /^Every supported school is listed here/);
+});
 test('every menu item is reachable and every tool dialog has a close control and a read-only warning mirror', t => {
   const { doc } = page(t);
   const items = [...doc.querySelectorAll('#menu [role=menuitem]')].map(item => item.textContent.trim());
@@ -117,12 +125,14 @@ test('disclosures swap the entry for the panel and Close returns focus to the en
 
 test('Homestream without a guard changes games and refreshes directly', async t => {
   const { metadataURL, mediaURL } = await import('../src/gateway.js');
-  const source = readFileSync(new URL('../src/homestream-ui.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace('export function', 'function');
+  const { defaultGame } = await import('../src/game-choice.js');
+  const source = readFileSync(new URL('../src/homestream-ui.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace(/export function/g, 'function');
   const dom = new JSDOM(html, { url: 'https://example.test/homecall/', runScripts: 'outside-only' }); t.after(() => dom.window.close());
   const win = dom.window, get = id => win.document.getElementById(id);
-  const games = [{ id: 'now', start: Date.now(), url: 'https://gateway.example/media/game/team-id/now', opponent: 'Tennessee' }, { id: 'later', start: Date.now() + 864e5, url: null, opponent: 'Mercer' }];
+  // 'now' kicks off in a minute, so it is the default next upcoming game.
+  const games = [{ id: 'now', start: Date.now() + 6e4, url: 'https://gateway.example/media/game/team-id/now', opponent: 'Tennessee' }, { id: 'later', start: Date.now() + 864e5, url: null, opponent: 'Mercer' }];
   let reads = 0, stopped = 0;
-  Object.assign(win, { AbortController, metadataURL, mediaURL, __GATEWAY_ORIGIN__: 'https://gateway.example', checkPlaylist: async () => 'ready',
+  Object.assign(win, { AbortController, metadataURL, mediaURL, defaultGame, __GATEWAY_ORIGIN__: 'https://gateway.example', checkPlaylist: async () => 'ready',
     readJSON: async url => { reads++; return url.pathname.endsWith('/teams') ? [{ id: 'team-id', name: 'Georgia Tech' }] : games; } });
   win.eval(source + ';window.setup=setupHomestream;');
   const ui = win.setup({ onChange: () => { stopped++; }, onReady: () => {} });

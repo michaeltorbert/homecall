@@ -26,7 +26,8 @@ const GAME={id:'g1',url:'https://gateway.example/media/game/2903e5f6-960e-4954-a
 const gameCatalog=(status='ready',game=GAME)=>callbacks=>({ready:status==='ready'?game:null,status,callbacks,refreshes:0,stop(){},setEnabled(){},relabel(){},
  async refresh(){this.refreshes++;callbacks.onChange('refresh');callbacks.onReady();}});
 const denied=()=>{const error=Error('blocked');error.name='NotAllowedError';return error;};
-function harness(t, catalogFactory, extra={}) {
+// storage: extra localStorage entries present before the app loads.
+function harness(t, catalogFactory, {storage:seed={},...extra}={}) {
  const dom=new JSDOM(html,{url:'https://example.test/',runScripts:'outside-only'}),w=dom.window;
  t.after(()=>w.close());let player, catalog;
  // outcomes: one entry per start; an Error rejects, 'defer' leaves it pending in player.pending, anything else resolves.
@@ -57,6 +58,7 @@ function harness(t, catalogFactory, extra={}) {
   createGameStatus:()=>({setGames(){},clear(){},suspend(){},resume(){},tick(){},stop(){}}),createBroadcastCountdown:options=>{fakeCountdown.options=options;return fakeCountdown;},
   createNowPlaying,nowPlayingArtwork,createScoreboard,metadataURL,configuredGatewayOrigin,gatewayOptions,readJSON:async()=>{throw Error('no metadata in recovery tests');},applySchoolTheme,...shell,...extra});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
+ for(const [key,value] of Object.entries(seed))w.localStorage.setItem(key,value);
  w.URL.revokeObjectURL=()=>{};w.eval(source);const $=id=>w.document.getElementById(id);
  return {w,player,timing:fakeTiming,countdown:fakeCountdown,get catalog(){return catalog},$,prompt:()=>$('confirm-dialog').hasAttribute('open'),proceed:()=>$('confirm-continue').click(),dismiss:()=>$('confirm-cancel').click(),
   log:()=>{$('preview').click();return JSON.parse($('export').value);}};
@@ -467,7 +469,8 @@ test('AC13/AC14 catalog-only schools join by explicit ID with no fallback or inv
  const list=[{id:'b3c33c46-a9e4-4e3b-9d5a-4fefb625f14c',name:'Virginia'},{id:'ffacbef1-e8a5-4872-9401-eff97cdf2c9c',name:'Auburn'},{id:'2903e5f6-960e-4954-a3ec-f7754e78660f',name:'Duke'}];
  const reader=async url=>{if(url.pathname.endsWith('/homestream/teams'))return list;throw Error('unexpected');};
  let h=harness(t,gameCatalog('unavailable'),{readJSON:reader});await settle();
- assert.deepEqual([...h.$('team').options].map(o=>o.value),['duke','miami','vt','gt','uva','auburn']);
+ // Deliberate change (issue #31): configured catalog-only schools are listed from the start in configured order.
+ assert.deepEqual([...h.$('team').options].map(o=>o.value),['duke','miami','vt','gt','auburn','uva']);
  h.$('team').value='uva';h.$('team').onchange();
  assert.equal(h.$('connect').disabled,true);assert.equal(h.$('source-current').textContent,'No feed is available for this game right now.');
  assert.equal(h.$('feed-picker').hidden,true);assert.equal(h.$('official').hidden,true);
@@ -476,6 +479,47 @@ test('AC13/AC14 catalog-only schools join by explicit ID with no fallback or inv
  assert.equal(h.player.starts.length,1);assert.equal(h.$('notice').textContent,'Audio could not play. Press Retry to start again.');
  assert.equal(h.$('recover-official').hidden,true);assert.equal(h.$('recover-note').hidden,false);assert.equal(h.$('recover-note').textContent,'No official player link is configured for Virginia.');
  assert.equal(h.log().team,'uva');
+});
+// Issue #31: a first visit finds every configured school in Listen, whatever the catalog does.
+const SIX=[['duke','Duke'],['miami','Miami'],['vt','Virginia Tech'],['gt','Georgia Tech'],['auburn','Auburn'],['uva','Virginia (UVA)']];
+const teamOptions=h=>[...h.$('team').options].map(o=>[o.value,o.textContent]);
+test('a fresh visit lists all six configured schools with the catalog failing, empty or slow; Virginia Tech and Virginia (UVA) stay distinct',async t=>{
+ let resolveSlow;
+ for(const [name,readJSON] of [['failed',async()=>{throw Error('403');}],['empty',async()=>[]],['slow',()=>new Promise(r=>{resolveSlow=r;})]]){
+  const h=harness(t,gameCatalog('unavailable'),{readJSON});
+  assert.deepEqual(teamOptions(h),SIX,`${name}: listed synchronously, before metadata`);await settle();
+  assert.deepEqual(teamOptions(h),SIX,name);
+  assert.equal(h.$('team').getAttribute('aria-describedby'),'team-help');assert.match(h.$('team-help').textContent,/Every supported school is listed/);
+  h.$('team').focus();
+  if(name==='slow'){resolveSlow([{id:'00000000-0000-4000-8000-000000000001',name:'Elsewhere State'}]);await settle();
+   assert.deepEqual(teamOptions(h).at(-1),['catalog:00000000-0000-4000-8000-000000000001','Elsewhere State'],'an extra school is appended by ID');
+   assert.equal(h.w.document.activeElement,h.$('team'),'focus stays');assert.equal(h.$('team').value,'duke','selection stays');}
+  for(const key of ['auburn','uva']){
+   h.$('team').value=key;h.$('team').onchange();
+   assert.equal(h.$('team').value,key);assert.equal(h.$('connect').disabled,true);assert.equal(h.$('source-current').textContent,'No feed is available for this game right now.');
+   assert.equal(h.$('game-panel').hidden,true,'the fake catalog owns the panel; the school itself is still selectable');
+   assert.equal(h.$('station').textContent,key==='uva'?'Virginia (UVA)':'Auburn','the heading uses the display label');
+  }
+  h.$('team').value='vt';h.$('team').onchange();assert.equal(h.$('station').textContent,'Virginia Tech Sports Network');
+  h.$('connect').click();assert.equal(h.player.starts[0].url,teams.vt.url,'Virginia Tech plays its own network inside the click');
+ }
+});
+test('a saved configured school, catalog-only included, is restored and saved; catalog:<id> schools and blocked storage are not',async t=>{
+ let h=harness(t,undefined,{storage:{'mystream.team':'uva'}});
+ assert.equal(h.$('team').value,'uva');assert.deepEqual(h.countdown.schools,['uva']);
+ h.$('team').value='auburn';h.$('team').onchange();assert.equal(h.w.localStorage.getItem('mystream.team'),'auburn');
+ h=harness(t,undefined,{storage:{'mystream.team':'catalog:00000000-0000-4000-8000-000000000001'}});assert.equal(h.$('team').value,'duke');
+ const list=[{id:'00000000-0000-4000-8000-000000000001',name:'Elsewhere State'}];
+ h=harness(t,undefined,{readJSON:async()=>list});await settle();
+ h.$('team').value='catalog:00000000-0000-4000-8000-000000000001';h.$('team').onchange();
+ assert.notEqual(h.w.localStorage.getItem('mystream.team'),'catalog:00000000-0000-4000-8000-000000000001','an unconfigured school is never saved');
+ h=harness(t,undefined,{storage:{'mystream.team':'bogus'}});assert.equal(h.$('team').value,'duke');
+});
+test('no game choice is saved: only the team, per-source delays and session logs are stored',async t=>{
+ const h=harness(t,gameCatalog());h.$('team').value='gt';h.$('team').onchange();h.$('connect').click();await settle();
+ const keys=[];for(let i=0;i<h.w.localStorage.length;i++)keys.push(h.w.localStorage.key(i));
+ assert.ok(keys.every(key=>key==='mystream.team'||key.startsWith('homecall.position.')||key.startsWith('mystream.session.')),keys.join());
+ assert.equal(h.w.localStorage.getItem('mystream.team'),'gt');
 });
 test('AC15 Source override: Automatic default; a manual choice survives Stop and Play and resets on Automatic, team or game change',async t=>{
  const h=harness(t,gameCatalog());assert.equal(h.$('feed').options[0].value,'auto');assert.equal(h.$('feed').value,'auto');

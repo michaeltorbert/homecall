@@ -27,7 +27,38 @@ test('every catalog school is reachable by explicit ID; names never merge school
   assert.equal(list.get('vt').catalogId, null, 'a catalog entry named Virginia Tech is a separate catalog-only school');
   assert.equal(list.get('uva').name, 'Virginia'); assert.equal(list.get('uva').radio, false);
   assert.equal(list.get('catalog:00000000-0000-4000-8000-000000000001').name, 'Elsewhere State');
-  assert.deepEqual([...listenTeams().keys()], ['gt', 'duke', 'miami', 'vt'], 'without the catalog only configured teams are listed');
+  assert.equal(list.get('catalog:00000000-0000-4000-8000-000000000002').label, 'Virginia Tech', 'an unconfigured school keeps its catalog name as its label');
+});
+// Issue #31: discovery never depends on the catalog answering.
+const SIX = ['gt', 'duke', 'miami', 'vt', 'auburn', 'uva'];
+test('every configured school is listed before, without and regardless of the catalog, with the same identity', () => {
+  const seeded = listenTeams();
+  assert.deepEqual([...seeded.keys()], SIX, 'catalog-only schools are listed before metadata');
+  for (const failed of [undefined, null, [], {}, 'error', [null, { id: 1 }, { id: 'not-a-uuid', name: 'X' }]]) assert.deepEqual([...listenTeams(failed).keys()], SIX, JSON.stringify(failed));
+  const loaded = listenTeams(CATALOG);
+  for (const key of SIX) assert.deepEqual(seeded.get(key), loaded.get(key), `${key}: the catalog answering changes nothing`);
+  assert.deepEqual(Object.fromEntries([...seeded].map(([key, t]) => [key, [t.catalogId, t.radio]])), {
+    gt: [teams.gt.catalogId, false], duke: [teams.duke.catalogId, true], miami: [null, true], vt: [null, true], auburn: [catalogTeams.auburn.catalogId, false], uva: [catalogTeams.uva.catalogId, false] });
+  // Dynamic catalog IDs only add schools; a configured ID never moves to another key.
+  const dynamic = listenTeams([{ id: catalogTeams.uva.catalogId, name: 'Renamed Virginia' }, { id: '00000000-0000-4000-8000-0000000000aa', name: 'Auburn' }]);
+  assert.equal(dynamic.get('uva').name, 'Virginia', 'the configured identity name wins over a catalog rename');
+  assert.equal(dynamic.get('auburn').catalogId, catalogTeams.auburn.catalogId, 'a same-named school with another ID never merges');
+  assert.equal(dynamic.get('catalog:00000000-0000-4000-8000-0000000000aa').name, 'Auburn');
+});
+test('Virginia Tech and Virginia (UVA) are distinct in label, name, identity and sources', () => {
+  const list = listenTeams(), vt = list.get('vt'), uva = list.get('uva');
+  assert.deepEqual([vt.label, vt.name, vt.catalogId], ['Virginia Tech', 'Virginia Tech', null]);
+  assert.deepEqual([uva.label, uva.name, uva.catalogId], ['Virginia (UVA)', 'Virginia', catalogTeams.uva.catalogId], 'the label is display only; name stays the identity');
+  assert.deepEqual(ids(resolveSources(vt, { status: 'unavailable' })), ['vt-leanstream']);
+  assert.deepEqual(resolveSources(uva, { status: 'unavailable' }).candidates, [], 'no radio is invented for Virginia');
+  for (const key of SIX.filter(k => k !== 'uva')) assert.equal(list.get(key).label, list.get(key).name, key);
+});
+test('every configured feed is reachable from some school: every network source and every catalog game source', () => {
+  const list = listenTeams(), reached = new Set();
+  for (const team of list.values()) {
+    for (const c of resolveSources(team, { status: 'ready', game: { ...game, id: `${team.key}-g` } }).candidates) reached.add(c.sourceId);
+  }
+  assert.deepEqual([...reached].sort(), [...liveSourceIds].filter(id => id !== 'catalog-game').sort(), 'all configured sources; catalog-game is only for unconfigured schools');
 });
 test('order: playable game feed, network, network backup, affiliates; checking and unavailable states are honest', () => {
   const duke = listenTeams(CATALOG).get('duke');
