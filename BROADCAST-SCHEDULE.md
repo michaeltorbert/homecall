@@ -1,6 +1,6 @@
 # Broadcast schedule findings (issue #32, Phase 0)
 
-Research recorded 2026-10-10. For each Homecall school, this file records what the broadcaster publishes about upcoming broadcasts, field by field. A bounded Duke-only countdown was then built on the verified Duke contract (see **Implemented Duke scope**); the research sections below are kept as recorded. **Issue #32 is not complete**: every school other than Duke is unverified, and device, deployed and real-provider behavior are unproven (see the final section).
+Research recorded 2026-10-10. For each Homecall school, this file records what the broadcaster publishes about upcoming broadcasts, field by field. A bounded Duke-only countdown was built on the verified Duke contract (see **Implemented Duke scope**). The research sections below remain the dated October 10 record. Current release and browser status, checked 2026-10-14, is recorded at the end and supersedes the earlier unreleased-candidate statements. Non-Duke provider availability remains unverified; the user's selected product scope is Duke only.
 
 This file contains no addresses: no provider hosts, feed or script paths, query strings, raw XML or private configuration values. The raw evidence is kept outside the repository and is cited here by evidence ID and content hash. Repository paths are cited as code provenance.
 
@@ -257,7 +257,7 @@ These are product rules and proposed local settings, not provider facts.
 
 ## Implemented Duke scope
 
-This supersedes the research-phase proposal. It is bounded to Duke. It is not proof of real-provider, deployed or device behavior.
+This supersedes the research-phase proposal and is bounded to Duke. The implementation details below describe the source contract. Release and production-browser evidence is recorded in the current status section; native-device evidence remains separate.
 
 **Route and configuration (Option B).**
 - **Route.** The gateway route `/api/broadcast/schedule/duke` (client path `broadcast/schedule/duke`) is served by `lib/broadcast-schedule.mjs`.
@@ -335,25 +335,28 @@ This supersedes the research-phase proposal. It is bounded to Duke. It is not pr
 
 All fixtures are synthetic.
 
-**Not proved.** The live entry's real encoding, the feed's real `Date`/`Age` headers and the deployed configuration all need a coordinator-run metadata-only check before release. If any of them fails these rules, the feature shows unknown rather than a countdown. Workers `Intl` support is covered only in local workerd. No browser, device or production evidence exists here, and issue #30 phone checks stay open.
+**Historical release-evidence limit (as of 2026-10-10).** At that point, the live entry's real encoding, the feed's real `Date`/`Age` headers and deployed configuration had not been checked; no browser or production evidence existed. The current production release and browser checks below supersede those deployment-status statements. They do not establish raw upstream encoding or provider header semantics. Workers `Intl` support is covered by local workerd checks. Native-device and phone checks remain separate and open under issue #30.
 
-## Issue #32 status
+## Current issue #32 status (checked 2026-10-14)
 
-Requested work:
+The user selected a Duke-only countdown: “actually I'm the only one using it so let's just leave the countdown for Duke.” This narrows the requested school coverage. It does not establish that any other provider is unsupported. All non-Duke school/provider findings in the dated research above remain unverified.
 
-- **Investigate first:** **partly done.** Duke is covered at field level, including its time-zone handling. Provider cadence is unknown. Every other school is unverified.
-- **Build the countdown:** **Duke only, implemented as a bounded candidate.** Not reviewed, deployed or device-tested.
+The Duke countdown is released in production. The current production page identifies build `0.4.0+978d359` at commit `978d359852b9cd4e7a1fde83c57856194aad42bd`; its served JavaScript matched the current release bytes. The merged releases are [PR #35](https://github.com/michaeltorbert/homecall/pull/35) (gateway) and [PR #36](https://github.com/michaeltorbert/homecall/pull/36) (countdown UI). A coordinator-run, muted ordinary production-browser check showed “Duke network · Next broadcast starts in 2 d 23 h (Sat 2:00 PM) · Football: UNC,” matching the sanitized schedule label. A later ordinary refresh advanced `checkedAt` by about 60 seconds. The browser made no direct broadcaster requests; only the app and configured gateway origins were observed (`unexpectedOriginCount` was 0). The response contained only the public event projection. Playback remained stopped and Media Session metadata was empty.
 
-Acceptance criteria. "Candidate" means the item is implemented and covered by synthetic tests, pending independent review and real-provider checks.
+The observed display stayed at `2 d 23 h` across that minute because the formatter shows days and hours. The browser observation therefore confirms the scheduled refresh and updated response timestamp, but does not demonstrate visibly changing seconds or a provider schedule change. The focused synthetic-clock checks cover ticking, target changes, zero, empty, stale and failure states. Provider update cadence, raw upstream encoding and real response `Date`/`Age` semantics remain unknown. This check was not a device or audio-playback test; native listening gates remain tracked separately, including issues #12, #19, #30, #31 and #39.
 
-| # | Criterion | Disposition |
+The original nine acceptance criteria are dispositioned for the user-selected Duke scope:
+
+| # | Criterion | Current disposition and evidence boundary |
 |---|---|---|
-| 1 | Findings documented: which schools have usable data, and which fields | **Partly met.** Duke's contract is documented. Every other row is explicitly unverified, not unsupported. |
-| 2 | Countdown and event label for a known upcoming broadcast, without opening the official player | **Duke candidate.** Covers games and shows, including during a current event or playback. The overnight rule can deliberately show unknown instead. |
-| 3 | Labeled as broadcast start; kickoff never presented as broadcast start | **Duke candidate.** Uses only `start_timestamp`, which the provider's own countdown uses. No kickoff, Homestream `start` or ESPN time is used. |
-| 4 | Updates automatically; schedule refresh reflects changes | **Duke candidate.** 1-second ticks, 60-second polling and cache, 300-second maximum age. These are local policy; provider cadence is unknown. |
-| 5 | Missing, ambiguous or stale times give unknown | **Duke candidate.** Covers malformed rows, ties, the overnight rule, unknown or stale age, failures and clock jumps. The overnight heuristic cannot catch every placeholder. |
-| 6 | No countdown for schools without a broadcaster schedule | **Partial.** Non-Duke and dynamic schools show nothing and make no request. Their providers are unverified, not proven unsupported. |
-| 7 | Clear message when there is no upcoming event | **Duke candidate.** "No upcoming broadcast listed" appears only for a valid empty listing. The provider's coverage window is unknown. |
-| 8 | Zero proves neither audio nor a live game; game status stays separate (#10) | **Duke candidate.** Neutral wording at zero. No coupling to game status, Player or Sync. |
-| 9 | No new browser-to-provider requests or exposed addresses; privacy, playback and manual sync preserved | **Duke candidate.** The browser reaches the gateway only. Leak tests cover output, cache, errors and diagnostics. Playback non-disruption is shown with fakes, not on a device. |
+| 1 | Findings document usable broadcaster schedules and available fields | **Excepted beyond Duke by the user's scope decision; Duke findings met.** This document records the Duke field binding and explicitly retains every other provider as unverified. It does not claim that other schools lack schedules. |
+| 2 | Show a countdown and event label for a known upcoming broadcast without opening the official player | **Met for Duke.** The production browser displayed the Duke network countdown and `Football: UNC` label; the sanitized response identified the same event. |
+| 3 | Label broadcast start; never present kickoff as broadcast start | **Met for Duke.** The implementation uses the Duke `start_timestamp` contract and labels the line “Next broadcast starts.” In the browser, broadcast start at Saturday 2:00 PM remained distinct from the football kickoff at 3:30 PM. |
+| 4 | Update automatically and refresh schedule data | **Met, with a display-resolution limit.** Source and focused tests cover one-second countdown ticks and 60-second polling. In production, the later refresh advanced `checkedAt` by about 60 seconds. The displayed days/hours value did not visibly change during that observation; provider cadence and a real provider schedule change were not observed. |
+| 5 | Missing, ambiguous or stale times show unknown, not an estimate | **Met for the implemented Duke path by source and synthetic checks.** Focused tests cover invalid, missing, tied, stale and failed data plus clock jumps. These failure states were not injected into production. |
+| 6 | Schools without usable broadcaster schedules show no countdown | **Met as Duke-only behavior, without a provider-capability claim.** Only Duke has a schedule path; the production browser showed the countdown hidden for Virginia Tech and made no additional schedule request. Other providers remain unverified. |
+| 7 | Clearly state when no upcoming event is listed | **Met by source and synthetic checks.** A valid empty Duke listing reads “No upcoming broadcast listed”; no live empty-feed observation was made. |
+| 8 | Zero does not prove audio or a live game; game status stays separate | **Met by source and synthetic checks.** Zero has neutral wording and no game-status or playback coupling. The production check kept playback stopped with no Media Session metadata; it did not observe an event reaching zero. |
+| 9 | No direct browser-to-provider requests or exposed provider addresses; preserve privacy, playback and manual sync | **Met for the observed Duke route and source behavior.** The production browser recorded no unexpected origins, and the public response contained only the sanitized event projection. The check left playback stopped; source wiring keeps playback and manual synchronization separate. This is not native-device playback evidence. |
+
+The requested Duke countdown work is complete within this scope. The accepted Duke-only scope is not a finding that non-Duke providers are unsupported. Provider cadence, upstream encoding/header details, and native playback/device behavior remain outside this closeout's proof. The separate native gates listed above remain open.
