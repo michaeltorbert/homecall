@@ -74,18 +74,18 @@ export default { async fetch() {
 const mf = new Miniflare({
   telemetry: { enabled: false },
   workers: [
-    { config: { name: 'gateway', type: 'worker', compatibilityDate: config.compatibility_date,
+    { config: { name: 'gateway', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'index.js', modules: { 'index.js': { type: 'esm', contents: bundle } } },
       env: { MEDIA_STREAM_MODE: {type:'text',value:'native'}, ENABLE_CATALOG_REFRESH: {type:'text',value:'true'}, ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS }, STREAM_CATALOG: {type:'kv',id:'fixture-catalog'} }
     }, dev: { outboundService: { type: 'fetcher', handler: upstream } } },
-    { config: { name: 'cancel-probe', type: 'worker', compatibilityDate: config.compatibility_date,
+    { config: { name: 'cancel-probe', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'index.js', modules: { 'index.js': { type: 'esm', contents: bundle } } },
       env: { MEDIA_STREAM_MODE: {type:'text',value:'native'}, ALLOWED_ORIGINS: { type: 'text', value: config.vars.ALLOWED_ORIGINS }, STREAM_CATALOG: {type:'kv',id:'fixture-catalog'} }
     }, dev: { outboundService: {type:'node-handler',handler:streamingUpstream} } },
-    { config: { name: 'schedule-probe', type: 'worker', compatibilityDate: config.compatibility_date,
+    { config: { name: 'schedule-probe', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'probe.mjs', modules: Object.fromEntries([['probe.mjs', scheduleProbe], ...['broadcast-schedule.mjs', 'duke-source.mjs', 'backend-json.mjs', 'archive-source.mjs'].map(name => [name, readFileSync(`lib/${name}`, 'utf8')])].map(([name, contents]) => [name, { type: 'esm', contents }])) }
     } },
-    { config: { name: 'reader-probe', type: 'worker', compatibilityDate: config.compatibility_date,
+    { config: { name: 'reader-probe', compatibilityDate: config.compatibility_date,
       manifest: { mainModule: 'probe.mjs', modules: {
         'probe.mjs': { type: 'esm', contents: readerProbe },
         'backend-json.mjs': { type: 'esm', contents: readFileSync('lib/backend-json.mjs', 'utf8') }
