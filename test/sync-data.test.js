@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSchedule, normalizePlays, normalizeStatusSnapshot, normalizeGameStatus, syncData } from '../lib/sync-data.mjs';
-import { normalizeScoreboard } from '../lib/timing-normalize.mjs';
+import { normalizeScoreboard, normalizeKickoff } from '../lib/timing-normalize.mjs';
+import { validateStatusSnapshot } from '../src/game-status.js';
 const now = Date.parse('2026-09-13T02:00:00Z');
 const competitors = () => [{id:'59',team:{id:'59',location:'Georgia Tech'}},{id:'2633',team:{id:'2633',location:'Tennessee'}}];
 const summary = () => ({header:{id:'123',uid:'s:20~l:23~e:123',league:{id:'23',slug:'college-football'},season:{year:2026},competitions:[{id:'123',competitors:competitors()}]},drives:{previous:[]}});
@@ -178,4 +179,73 @@ test('non-live, unknown and between-period statuses carry no scoreboard even whe
 test('provider schedule dates with minute precision retain explicit UTC identity',()=>{
  const data=schedule();data.events[0].date='2026-09-12T23:00Z';
  assert.equal(normalizeSchedule(data)[0].start,Date.parse('2026-09-12T23:00:00Z'));
+});
+
+// Issue #44 kickoff confidence. Each row copies id, date, the event and competition timeValid flags,
+// competition.status and competitor identity from the public Duke 2026 schedule as observed
+// 2026-10-15; every other provider field is removed.
+const observedPre=(detail,shortDetail)=>({clock:0,displayClock:'0:00',period:0,type:{id:'1',name:'STATUS_SCHEDULED',state:'pre',completed:false,description:'Scheduled',detail,shortDetail}});
+const dukeRows=()=>[
+ ['401858255','2026-10-10T19:30Z',true,observedFinal(),[['59','Georgia Tech'],['150','Duke']]],
+ ['401858266','2026-10-17T19:30Z',true,observedPre('Sat, October 17th at 3:30 PM EDT','10/17 - 3:30 PM EDT'),[['150','Duke'],['153','North Carolina']]],
+ ['401858279','2026-10-31T04:00Z',false,observedPre('10/31 - TBD','TBD'),[['150','Duke'],['103','Boston College']]],
+ ['401858286','2026-11-07T05:00Z',false,observedPre('11/7 - TBD','TBD'),[['152','NC State'],['150','Duke']]],
+ ['401858296','2026-11-14T05:00Z',false,observedPre('11/14 - TBD','TBD'),[['2390','Miami'],['150','Duke']]],
+ ['401858303','2026-11-21T00:30Z',true,observedPre('Fri, November 20th at 7:30 PM EST','11/20 - 7:30 PM EST'),[['150','Duke'],['228','Clemson']]],
+ ['401858312','2026-11-28T05:00Z',false,observedPre('11/28 - TBD','TBD'),[['154','Wake Forest'],['150','Duke']]]];
+const dukeSchedule=(rows=dukeRows())=>({team:{id:'150'},season:{year:2026},events:rows.map(([id,date,timeValid,status,teams])=>({id,date,timeValid,season:{year:2026},
+ competitions:[{id,date,timeValid,status,competitors:teams.map(([team,location])=>({id:team,team:{id:team,location}}))}]}))});
+const SCHEMA_1_EVENT=['id','start','teams','teamIds','season','status'];
+test('kickoff confidence requires agreeing boolean timeValid on the event and its competition',()=>{
+ assert.equal(normalizeKickoff({timeValid:true},{timeValid:true}),'confirmed');
+ assert.equal(normalizeKickoff({timeValid:false},{timeValid:false}),'tbd');
+ for(const [event,competition] of [[{timeValid:true},{timeValid:false}],[{timeValid:false},{timeValid:true}],[{timeValid:true},{}],[{},{timeValid:false}],[{},{}],
+  [{timeValid:null},{timeValid:null}],[{timeValid:'true'},{timeValid:'true'}],[{timeValid:'false'},{timeValid:'false'}],[{timeValid:1},{timeValid:1}],[{timeValid:0},{timeValid:0}],
+  [undefined,{timeValid:true}],[{timeValid:false},undefined],[null,null]])
+  assert.equal(normalizeKickoff(event,competition),undefined,JSON.stringify([event,competition]));
+});
+test('observed Duke schedule: provider TBD rows are tbd and timed rows confirmed; start, status and schedule DTO unchanged',()=>{
+ const data=dukeSchedule();
+ const snapshot=normalizeStatusSnapshot(data,now,{teamId:'150',season:2026});
+ assert.deepEqual(snapshot.events.map(e=>[e.id,e.status,e.kickoff]),[['401858255','completed','confirmed'],['401858266','upcoming','confirmed'],
+  ['401858279','upcoming','tbd'],['401858286','upcoming','tbd'],['401858296','upcoming','tbd'],['401858303','upcoming','confirmed'],['401858312','upcoming','tbd']]);
+ // The provider's TBD date is still forwarded as start; confidence travels beside it, never replaces it.
+ assert.deepEqual(snapshot.events.map(e=>e.start),dukeRows().map(([,date])=>Date.parse(date)));
+ for(const event of snapshot.events) assert.deepEqual(Object.keys(event),[...SCHEMA_1_EVENT,'kickoff']);
+ const schedule=normalizeSchedule(data,{teamId:'150',season:2026});
+ assert.deepEqual(snapshot.events.map(({status,kickoff,...event})=>event),schedule);
+ for(const event of schedule) assert.deepEqual(Object.keys(event),['id','start','teams','teamIds','season'],'schedule DTO gains no kickoff');
+ const text=JSON.stringify(snapshot);
+ for(const leaked of ['timeValid','TBD','EDT','EST','Scheduled']) assert.ok(!text.includes(leaked),leaked);
+});
+test('kickoff follows the flag, never the clock: an explicit 12:34 stays confirmed and a flagged TBD stays tbd at any hour',()=>{
+ // SYNTHETIC dates on an observed identity; only the date and flag vary.
+ const kickoff=(date,timeValid)=>normalizeStatusSnapshot(dukeSchedule([['401858279',date,timeValid,observedPre('synthetic','synthetic'),[['150','Duke'],['103','Boston College']]]]),now,{teamId:'150',season:2026}).events[0].kickoff;
+ assert.equal(kickoff('2026-10-31T16:34Z',true),'confirmed','a valid explicit 12:34 PM EDT kickoff is preserved');
+ assert.equal(kickoff('2026-10-31T16:34Z',false),'tbd');
+ assert.equal(kickoff('2026-10-31T04:00Z',true),'confirmed','a midnight-local date is not treated as a placeholder');
+ assert.equal(kickoff('2026-10-31T19:30Z',false),'tbd');
+ assert.equal(kickoff('2026-10-31T16:34Z',undefined),undefined);
+});
+test('missing or contested flags keep exact schema 1 keys; kickoff is independent of unknown and live status',()=>{
+ const data=dukeSchedule();
+ delete data.events[2].timeValid;delete data.events[3].competitions[0].timeValid;data.events[4].timeValid=true;
+ data.events[5].competitions[0].status=synthetic('STATUS_POSTPONED','post',false);
+ data.events[6].competitions[0].status=synthetic('STATUS_IN_PROGRESS','in',false);
+ const snapshot=normalizeStatusSnapshot(data,now,{teamId:'150',season:2026});
+ assert.deepEqual(snapshot.events.map(e=>[e.status,e.kickoff]),[['completed','confirmed'],['upcoming','confirmed'],['upcoming',undefined],['upcoming',undefined],['upcoming',undefined],['unknown','confirmed'],['live','tbd']]);
+ for(const event of snapshot.events.slice(2,5)) assert.deepEqual(Object.keys(event),SCHEMA_1_EVENT);
+ assert.deepEqual(Object.keys(snapshot.events[5]),[...SCHEMA_1_EVENT,'kickoff'],'an unknown status does not erase kickoff');
+ assert.deepEqual(Object.keys(snapshot.events[6]),[...SCHEMA_1_EVENT,'scoreboard','kickoff']);
+ assert.deepEqual(snapshot.events[6].scoreboard,{phase:'in-progress',period:2,clock:'10:00'});
+});
+test('stage A compatibility: the current frontend validator accepts envelopes with and without kickoff identically',()=>{
+ const flagged=normalizeStatusSnapshot(dukeSchedule(),now,{teamId:'150',season:2026});
+ const bare=dukeSchedule();for(const e of bare.events){delete e.timeValid;delete e.competitions[0].timeValid;}
+ const legacy=normalizeStatusSnapshot(bare,now,{teamId:'150',season:2026});
+ for(const event of legacy.events) assert.deepEqual(Object.keys(event),SCHEMA_1_EVENT);
+ assert.deepEqual(Object.keys(flagged),Object.keys(legacy));
+ const accepted=validateStatusSnapshot(flagged,{teamId:'150',season:2026});
+ assert.equal(accepted.length,7,'no flagged event is rejected');
+ assert.deepEqual(accepted,validateStatusSnapshot(legacy,{teamId:'150',season:2026}));
 });
