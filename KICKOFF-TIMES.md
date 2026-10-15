@@ -39,7 +39,7 @@ DTO fields and public school pages. No private catalog or upstream URL is quoted
 3. **Labels** (`src/homestream-ui.js`):
    - Confirmed: `Oct 17, 3:30 PM · vs North Carolina`, the catalog time exactly as before #44.
    - TBD: `Oct 31, Time TBD · vs Boston`. The date is the catalog `date`, formatted in UTC so it never shifts a day. An invalid `date` shows `Date pending`; the label never falls back to `start`.
-   - Unconfirmed: `Oct 31, 12:34 PM (time unconfirmed) · vs Boston`.
+   - Unconfirmed: `Unconfirmed time: Oct 31, 12:34 PM · vs Boston`. The warning comes before the time. A trailing qualifier was hidden by the ellipsis of the closed select at 390 px (`Status unavailable · Sep 26, 3:30 PM…`), which would have shown a bare time as if confirmed. The full option text keeps the time, opponent and suffix.
 
    Status prefixes (`Upcoming ·`, `Status unavailable ·`) and the `· feed not published` suffix are unchanged. A relabel changes text only. Option values, order, selection, focus, disabled state, feed probes and readiness are untouched.
 

@@ -31,7 +31,8 @@ function kickoffText(g, kickoff) {
   if (g.start === null) return g.date || 'Date pending';
   if (kickoff === 'tbd') return `${calendarDate(g.date)}, Time TBD`;
   const time = new Date(g.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  return kickoff === 'confirmed' ? time : `${time} (time unconfirmed)`;
+  // The warning leads the time so a narrow closed select can never truncate it away.
+  return kickoff === 'confirmed' ? time : `Unconfirmed time: ${time}`;
 }
 const gameLabel = (g, kickoff) => `${kickoffText(g, kickoff)} · vs ${g.opponent}${g.url ? '' : ' · feed not published'}`;
 // The default game waits at most this long for the first status round.

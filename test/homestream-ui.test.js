@@ -83,7 +83,8 @@ test('kickoff labels: confirmed keeps the catalog time, TBD shows the catalog da
  const h=harness(t,{read:async u=>u.pathname.endsWith('/teams')?[{id:'team-id',name:'Georgia Tech'}]:catalog,probe:async()=>{probes++;return 'ready';}});
  h.ui.setEnabled(true);await tick();
  const labels=()=>[...h.$('game').options].filter(o=>o.value).map(o=>o.textContent);
- const unconfirmed=catalog.map(g=>`${when(g.start)} (time unconfirmed) · vs ${g.opponent}${g.url?'':' · feed not published'}`);
+ // The warning precedes the time so a narrow closed select cannot show a bare time (390 px pixel finding).
+ const unconfirmed=catalog.map(g=>`Unconfirmed time: ${when(g.start)} · vs ${g.opponent}${g.url?'':' · feed not published'}`);
  assert.deepEqual(labels(),unconfirmed,'before any status every catalog time is unconfirmed');
  h.$('game').value='wm';await h.$('game').onchange();h.$('game').focus();
  const snapshot=()=>({values:[...h.$('game').options].map(o=>o.value),value:h.$('game').value,disabled:h.$('game').disabled,refresh:h.$('game-refresh').disabled,focus:h.w.document.activeElement===h.$('game'),ready:h.ui.ready?.id,stopped:h.stopped,rendered:h.rendered,probes,note:h.$('game-note').textContent});
