@@ -109,7 +109,7 @@ const player = new Player(update, (event, detail) => {
   render();
 });
 // Label-only game status for the Game choice; it never affects readiness, audio or timing.
-const gameStatus = createGameStatus({ read: metadata, enabled: () => document.visibilityState !== 'hidden', onUpdate: labels => catalog.relabel(labels) });
+const gameStatus = createGameStatus({ read: metadata, enabled: () => document.visibilityState !== 'hidden', onUpdate: (labels, kickoffs) => catalog.relabel(labels, kickoffs) });
 // The committed school's next network broadcast. It writes only its own line; never audio, catalog or status.
 const countdown = createBroadcastCountdown({ read: metadata, el: $('broadcast-next'), enabled: () => document.visibilityState !== 'hidden' });
 const catalog = setupHomestream({ guard: liveGuard, school: () => currentTeam().name, teamId: () => currentTeam().catalogId,

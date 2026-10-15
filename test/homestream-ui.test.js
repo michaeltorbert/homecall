@@ -68,6 +68,36 @@ test('relabel changes option text only: value, order, selection, disabled state,
  h.$('game').focus();const ready=snapshot();assert.equal(ready.focus,true);assert.equal(ready.disabled,false);
  h.ui.relabel(new Map([['now','LIVE']]));assert.deepEqual(snapshot(),ready);assert.equal(h.ui.ready.id,'now');
 });
+// Issue #44: kickoff wording from published confidence only. Times are not inferred from their value.
+test('kickoff labels: confirmed keeps the catalog time, TBD shows the catalog date, all else is unconfirmed; a manual choice and controls are untouched',async t=>{
+ const when=start=>new Date(start).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+ const day=utc=>new Date(utc).toLocaleDateString([],{month:'short',day:'numeric',timeZone:'UTC'});
+ const catalog=[
+  {id:'unc',opponent:'North Carolina',start:Date.parse('2026-10-17T19:30:00Z'),date:'2026-10-17',url:null},
+  {id:'bc',opponent:'Boston',start:Date.parse('2026-10-31T16:34:00Z'),date:'2026-10-31',url:null},
+  // A late Saturday kickoff whose UTC start falls on Sunday: the TBD date must stay the catalog Saturday.
+  {id:'late',opponent:'Miami',start:Date.parse('2026-11-15T03:30:00Z'),date:'2026-11-14',url:null},
+  {id:'bad',opponent:'Wake Forest',start:Date.parse('2026-11-28T17:00:00Z'),date:'2026-02-30',url:null},
+  {id:'wm',opponent:'William & Mary',start:Date.parse('2026-09-26T19:30:00Z'),date:'2026-09-26',url:'https://gateway.example/media/game/team-id/wm'}];
+ let probes=0;
+ const h=harness(t,{read:async u=>u.pathname.endsWith('/teams')?[{id:'team-id',name:'Georgia Tech'}]:catalog,probe:async()=>{probes++;return 'ready';}});
+ h.ui.setEnabled(true);await tick();
+ const labels=()=>[...h.$('game').options].filter(o=>o.value).map(o=>o.textContent);
+ // The warning precedes the time so a narrow closed select cannot show a bare time (390 px pixel finding).
+ const unconfirmed=catalog.map(g=>`Unconfirmed time: ${when(g.start)} · vs ${g.opponent}${g.url?'':' · feed not published'}`);
+ assert.deepEqual(labels(),unconfirmed,'before any status every catalog time is unconfirmed');
+ h.$('game').value='wm';await h.$('game').onchange();h.$('game').focus();
+ const snapshot=()=>({values:[...h.$('game').options].map(o=>o.value),value:h.$('game').value,disabled:h.$('game').disabled,refresh:h.$('game-refresh').disabled,focus:h.w.document.activeElement===h.$('game'),ready:h.ui.ready?.id,stopped:h.stopped,rendered:h.rendered,probes,note:h.$('game-note').textContent});
+ const before=snapshot();assert.deepEqual([before.value,before.ready,before.focus],['wm','wm',true]);
+ h.ui.relabel(new Map([['bc','Upcoming'],['wm','Completed']]),new Map([['unc','confirmed'],['bc','tbd'],['late','tbd'],['bad','tbd'],['wm','provisional']]));
+ assert.deepEqual(labels(),[`${when(catalog[0].start)} · vs North Carolina · feed not published`,`Upcoming · ${day(Date.UTC(2026,9,31))}, Time TBD · vs Boston · feed not published`,
+  `${day(Date.UTC(2026,10,14))}, Time TBD · vs Miami · feed not published`,'Date pending, Time TBD · vs Wake Forest · feed not published',`Completed · ${unconfirmed[4]}`]);
+ assert.notEqual(day(Date.UTC(2026,10,14)),day(catalog[2].start),'the TBD date is the catalog date, not the start');
+ assert.deepEqual(snapshot(),before);
+ h.ui.relabel(new Map(),new Map());assert.deepEqual(labels(),unconfirmed,'missing or stale confidence reverts to unconfirmed');
+ h.ui.relabel(new Map([['bc','Status unavailable']]));assert.equal(labels()[1],`Status unavailable · ${unconfirmed[1]}`,'a one-argument update reads as unconfirmed');
+ assert.deepEqual(snapshot(),before);
+});
 test('catalog refresh, failure and disabling invalidate labels; replaced options and throwing hooks are isolated',async t=>{
  let invalidations=0,gamesCalls=0,fail=false;
  const h=harness(t,{read:async u=>{if(fail)throw Error();return reader(u);},probe:async()=> 'ready',hooks:{onGames(){gamesCalls++;throw Error('label consumer');},onCatalogInvalidated(){invalidations++;throw Error('label consumer');}}});

@@ -3,10 +3,11 @@ export function clockSeconds(value) {
   const seconds = match ? Number(match[1]) * 60 + Number(match[2]) : NaN;
   return seconds <= 900 ? seconds : NaN;
 }
-// Verified catalog/provider spelling difference; do not use fuzzy school matching.
+// Verified catalog/provider spelling differences (the Duke catalog lists Boston College as "Boston");
+// exact keys only, never fuzzy school matching.
 export const schoolKey = value => {
   const key = String(value).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  return key === 'southernmississippi' ? 'southernmiss' : key;
+  return key === 'southernmississippi' ? 'southernmiss' : key === 'boston' ? 'bostoncollege' : key;
 };
 export function footballSeason(start) {
   const date = new Date(start);

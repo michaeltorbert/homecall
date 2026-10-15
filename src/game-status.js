@@ -7,6 +7,7 @@ export const STATUS_LABELS = Object.freeze({ live: 'LIVE', upcoming: 'Upcoming',
 export const STATUS_TIMEOUT_MS = 10000;
 export const MAX_STATUS_SEASONS = 2;
 const STATES = new Set(['live', 'upcoming', 'completed', 'unknown']);
+const KICKOFFS = new Set(['confirmed', 'tbd']);
 const validId = value => typeof value === 'string' && /^\d{1,12}$/.test(value);
 const validSeason = value => Number.isInteger(value) && value >= 2000 && value < 2100;
 const counts = values => { const map = new Map(); for (const value of values) map.set(value, (map.get(value) || 0) + 1); return map; };
@@ -41,7 +42,10 @@ export function validateStatusSnapshot(data, { teamId, season }) {
   return events.filter(e => ids.get(e.id) === 1).map(e => {
     const event = { id: e.id, start: e.start, teams: [...e.teams], teamIds: [...e.teamIds], season: e.season, status: e.status };
     const scoreboard = e.status === 'live' && e.scoreboard !== undefined ? validateScoreboard(e.scoreboard, event.teamIds) : null;
-    return scoreboard ? { ...event, scoreboard } : event;
+    // Optional kickoff confidence (issue #44). An unrecognized value is dropped; its event and status stay valid.
+    if (scoreboard) event.scoreboard = scoreboard;
+    if (KICKOFFS.has(e.kickoff)) event.kickoff = e.kickoff;
+    return event;
   });
 }
 // Only the two most recent catalog seasons are polled; older games stay unavailable.
@@ -61,23 +65,36 @@ export function gameMatches(games, school, snapshots) {
 export function gameStatuses(games, school, snapshots) {
   return new Map([...gameMatches(games, school, snapshots)].map(([id, event]) => [id, event && event.status !== 'unknown' ? event.status : 'unavailable']));
 }
+// Kickoff confidence for the same one-to-one matches, independent of status. TBD is the provider's
+// own flag; confirmed also requires the provider start to equal the catalog start exactly. Every other
+// game is absent, which reads as an unconfirmed catalog time. No provisional state is inferred.
+export function gameKickoffs(games, school, snapshots) {
+  const starts = new Map(games.map(g => [g.id, g.start]));
+  return new Map([...gameMatches(games, school, snapshots)].flatMap(([id, event]) =>
+    event?.kickoff === 'tbd' || (event?.kickoff === 'confirmed' && event.start === starts.get(id)) ? [[id, event.kickoff]] : []));
+}
 export function createGameStatus({ read, onUpdate, enabled = () => true, clock, timeout = ms => AbortSignal.timeout(ms), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = timer => clearTimeout(timer) }) {
   let generation = 0, catalog = null, seasons = new Map(), run = null, teams = null, teamsRequest = null, lifecycle = 0, published = '';
   // Seasons whose first poll of this catalog has not settled, and callers waiting on that first round.
   let firstRound = new Set(), waiters = [];
-  function states() {
-    if (!catalog) return new Map();
-    const fresh = new Map();
-    for (const entry of seasons.values()) if (entry.events && entry.freshness.fresh()) fresh.set(entry.season, entry);
-    return gameStatuses(catalog.games, catalog.school, fresh);
+  function fresh() {
+    const snapshots = new Map();
+    for (const entry of seasons.values()) if (entry.events && entry.freshness.fresh()) snapshots.set(entry.season, entry);
+    return snapshots;
   }
+  function states() {
+    return catalog ? gameStatuses(catalog.games, catalog.school, fresh()) : new Map();
+  }
+  // Labels and kickoff confidence come from one set of fresh snapshots; either changing republishes.
   function publish(force = false) {
     if (!catalog) return;
-    const labels = new Map([...states()].map(([id, state]) => [id, STATUS_LABELS[state]]));
-    const key = JSON.stringify([...labels]);
+    const snapshots = fresh();
+    const labels = new Map([...gameStatuses(catalog.games, catalog.school, snapshots)].map(([id, state]) => [id, STATUS_LABELS[state]]));
+    const kickoffs = gameKickoffs(catalog.games, catalog.school, snapshots);
+    const key = JSON.stringify([[...labels], [...kickoffs]]);
     if (!force && key === published) return;
     published = key;
-    try { onUpdate(labels); } catch { /* Labels cannot affect playback or the catalog. */ }
+    try { onUpdate(labels, kickoffs); } catch { /* Labels cannot affect playback or the catalog. */ }
   }
   function settle() { const done = waiters; waiters = []; for (const waiter of done) waiter(); }
   function halt() {
