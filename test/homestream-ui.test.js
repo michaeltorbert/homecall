@@ -32,6 +32,48 @@ test('refresh re-fetches exact addresses and blocks old source while catalog is 
  h.ui.setEnabled(true);await tick();assert.ok(h.ui.ready);fail=true;await h.ui.refresh();assert.equal(h.ui.ready,null);assert.match(h.$('game-note').textContent,/catalog could not load/);assert.equal(h.$('game-refresh').disabled,false);
 });
 
+test('focused manual refresh restores its enabled button after success and catalog failure',async t=>{
+ let fail=false;const h=harness(t,{read:async u=>{if(fail)throw Error('fixture failure');return reader(u);},probe:async()=> 'ready'});
+ h.ui.setEnabled(true);await tick();
+ const button=h.$('game-refresh');button.getClientRects=()=>[{width:80,height:24}];
+ for(const shouldFail of [false,true]){
+  fail=shouldFail;let active=button;
+  Object.defineProperty(h.w.document,'activeElement',{configurable:true,get:()=>active});
+  button.focus=()=>{active=button;};assert.equal(h.w.document.activeElement,button);
+  button.onclick();active=h.w.document.body;await tick();
+  assert.equal(button.disabled,false);assert.equal(h.w.document.activeElement,button,shouldFail?'failure restores browser-lost focus':'success restores browser-lost focus');
+ }
+});
+
+test('manual refresh does not reclaim focus after the user moves while its catalog read is pending',async t=>{
+ let deferred=null,hold=false;
+ const h=harness(t,{read:u=>hold?new Promise((resolve,reject)=>{deferred={resolve,reject,url:u};}):reader(u),probe:async()=> 'ready'});
+ h.ui.setEnabled(true);await tick();
+ const button=h.$('game-refresh'),away=h.w.document.createElement('button');away.textContent='Other action';h.$('game-panel').append(away);
+ button.getClientRects=()=>[{width:80,height:24}];hold=true;button.focus();button.onclick();
+ assert.equal(button.disabled,true);away.focus();away.blur();assert.equal(h.w.document.activeElement,h.w.document.body,'the user can move focus away and then to the document body');
+ deferred.resolve([{id:'team-id',name:'Georgia Tech'}]);await tick();deferred.resolve(games);await tick();
+ assert.equal(button.disabled,false);assert.equal(h.w.document.activeElement,h.w.document.body,'later focus movement wins over the old refresh intent');
+});
+
+test('stopping an in-flight focused refresh cancels its pending focus restoration',async t=>{
+ let finish;const h=harness(t,{read:u=>new Promise(resolve=>{finish=()=>resolve(u.pathname.endsWith('/teams')?[{id:'team-id',name:'Georgia Tech'}]:games);}),probe:async()=> 'ready'});
+ h.ui.setEnabled(true);await tick();
+ // Complete the initial request separately; only the explicit refresh is held below.
+ finish();await tick();finish();await tick();
+ const button=h.$('game-refresh');button.getClientRects=()=>[{width:80,height:24}];
+ let active=button;Object.defineProperty(h.w.document,'activeElement',{configurable:true,get:()=>active});button.focus=()=>{active=button;};
+ button.onclick();active=h.w.document.body;h.ui.stop();finish();await tick();
+ assert.equal(button.disabled,false);assert.equal(h.w.document.activeElement,h.w.document.body);
+});
+
+test('initial automatic discovery never claims Refresh focus',async t=>{
+ const h=harness(t,{read:reader,probe:async()=> 'ready'});const button=h.$('game-refresh');
+ button.getClientRects=()=>[{width:80,height:24}];h.ui.setEnabled(true);await tick();
+ assert.equal(button.disabled,false);assert.notEqual(h.w.document.activeElement,button);
+ await h.ui.refresh();assert.notEqual(h.w.document.activeElement,button,'an unfocused programmatic refresh does not claim focus');
+});
+
 test('Homestream discovery sends both metadata requests to the configured gateway and media probes use the relay',async t=>{
  const requests=[],probes=[];const h=harness(t,{gateway:'https://gateway.example',read:async url=>{requests.push(url.href);return reader(url);},probe:async url=>{probes.push(url);return 'ready';}});
  h.ui.setEnabled(true);await tick();assert.deepEqual(requests,['https://gateway.example/api/homestream/teams','https://gateway.example/api/homestream/games/team-id']);assert.deepEqual(probes,[games[0].url]);
