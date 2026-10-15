@@ -58,6 +58,38 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
   const invalidate = () => { try { onCatalogInvalidated?.(); } catch { /* Optional labels cannot block the catalog. */ } };
   // Readiness is unknown from the moment a reload or game change begins, before the owner re-renders.
   const begin = kind => { cancel(); status = 'loading'; onChange(kind); controller = new AbortController(); return controller.signal; };
+  function focusIntent(button, signal) {
+    let valid = true;
+    const moved = event => {
+      if (event.type === 'focusin' && event.target === button) return;
+      valid = false;
+    };
+    const clear = () => {
+      document.removeEventListener('keydown', moved, true);
+      document.removeEventListener('pointerdown', moved, true);
+      document.removeEventListener('click', moved, true);
+      document.removeEventListener('change', moved, true);
+      document.removeEventListener('focusin', moved, true);
+      signal.removeEventListener('abort', clear);
+    };
+    document.addEventListener('keydown', moved, true);
+    document.addEventListener('pointerdown', moved, true);
+    document.addEventListener('click', moved, true);
+    document.addEventListener('change', moved, true);
+    document.addEventListener('focusin', moved, true);
+    signal.addEventListener('abort', clear, { once: true });
+    return {
+      clear,
+      restore() {
+        const active = document.activeElement;
+        const panel = $('game-panel');
+        const fallback = !active || active === document.body || active === document.documentElement;
+        const visible = button.isConnected && button.getClientRects().length > 0 && panel && !panel.hidden;
+        if (valid && !signal.aborted && controller?.signal === signal && visible && (active === button || fallback) && active !== button) button.focus();
+        clear();
+      }
+    };
+  }
   const note = text => { $('game-note').textContent = caution ? `${caution} ${text}` : text; };
   // A disabled, value-less first option keeps the Game choice neutral; a choice removes it.
   function placeholder(text) {
@@ -94,10 +126,13 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
   // initial: a team was enabled, so a default may be chosen. An explicit refresh only keeps a choice.
   async function load(initial) {
     if (!enabled) return;
+    const refreshButton = $('game-refresh');
+    const wantsFocus = !initial && document.activeElement === refreshButton;
     const signal = begin('refresh'), owner = epoch();
     invalidate(); status = 'loading'; caution = '';
     games = []; $('game').replaceChildren();
-    $('game').disabled = true; $('game-refresh').disabled = true;
+    $('game').disabled = true; refreshButton.disabled = true;
+    const refreshFocus = wantsFocus ? focusIntent(refreshButton, signal) : null;
     $('game-note').textContent = `Loading ${school()} games…`;
     try {
       const list = await read(api('homestream/teams'), { signal });
@@ -151,7 +186,10 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
     } catch {
       if (!signal.aborted) { status = 'unavailable'; $('game-note').textContent = messages.catalog; onReady(); }
     } finally {
-      if (!signal.aborted) { $('game').disabled = !games.length; $('game-refresh').disabled = false; }
+      if (!signal.aborted) {
+        $('game').disabled = !games.length; refreshButton.disabled = false;
+        refreshFocus?.restore();
+      } else refreshFocus?.clear();
     }
   }
   async function change(id) {
