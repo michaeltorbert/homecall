@@ -19,6 +19,21 @@ const choose = {
   manual: () => 'Choose a game to check its feed.'
 };
 const UNCERTAIN = 'Live status could not be confirmed for the most recent game.';
+// Kickoff wording (issue #44). A catalog time is shown as confirmed only when fresh provider data
+// confirms it; a provider TBD shows the catalog's own calendar date, read in UTC so a YYYY-MM-DD
+// never shifts a day, and never falls back to the catalog start. See KICKOFF-TIMES.md.
+function calendarDate(value) {
+  const m = typeof value === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  const day = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+  return day && day.toISOString().slice(0, 10) === value ? day.toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'UTC' }) : 'Date pending';
+}
+function kickoffText(g, kickoff) {
+  if (g.start === null) return g.date || 'Date pending';
+  if (kickoff === 'tbd') return `${calendarDate(g.date)}, Time TBD`;
+  const time = new Date(g.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return kickoff === 'confirmed' ? time : `${time} (time unconfirmed)`;
+}
+const gameLabel = (g, kickoff) => `${kickoffText(g, kickoff)} · vs ${g.opponent}${g.url ? '' : ' · feed not published'}`;
 // The default game waits at most this long for the first status round.
 const INITIAL_WAIT_MS = 4000;
 // onGames/onCatalogInvalidated are optional label hooks; they never affect readiness or playback.
@@ -37,7 +52,7 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
   // idle (disabled), loading, checking, ready or unavailable: what the owner may say before Play.
   // committed is the selected game of the catalog team committedTeam; it never carries to another team.
   let controller, games = [], ready = null, enabled = false, committed = '', committedTeam = null, status = 'idle', caution = '';
-  const baseLabels = new WeakMap();
+  const optionGames = new WeakMap();
   const cancel = () => { controller?.abort(); controller = null; ready = null; };
   const invalidate = () => { try { onCatalogInvalidated?.(); } catch { /* Optional labels cannot block the catalog. */ } };
   // Readiness is unknown from the moment a reload or game change begins, before the owner re-renders.
@@ -105,8 +120,9 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
       $('game').replaceChildren();
       for (const g of games) {
         const option = document.createElement('option'); option.value = g.id;
-        option.textContent = `${g.start === null ? g.date || 'Date pending' : new Date(g.start).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} · vs ${g.opponent}${g.url ? '' : ' · feed not published'}`;
-        baseLabels.set(option, option.textContent);
+        // Unconfirmed until a fresh status publishes kickoff confidence.
+        option.textContent = gameLabel(g);
+        optionGames.set(option, g);
         $('game').append(option);
       }
       if (!games.length) { status = 'unavailable'; $('game-note').textContent = `No ${school()} football games are listed. Refresh later.`; onReady(); return; }
@@ -163,10 +179,12 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
     setEnabled(value) { enabled = value; cancel(); invalidate(); status = 'idle'; $('game-panel').hidden = !value; if (value) load(true); },
     stop() { controller?.abort(); controller = null; if (status === 'loading' || status === 'checking') status = 'unavailable'; $('game').disabled = !games.length; $('game-refresh').disabled = false; },
     // Text only: value, order, selection, disabled state, focus and readiness are untouched.
-    relabel(labels) {
+    // kickoffs maps game ID to 'confirmed' or 'tbd'; any other game shows its time as unconfirmed.
+    relabel(labels, kickoffs = new Map()) {
       for (const option of $('game').options) {
-        const base = baseLabels.get(option);
-        if (base === undefined) continue;
+        const game = optionGames.get(option);
+        if (game === undefined) continue;
+        const base = gameLabel(game, kickoffs.get(option.value));
         const prefix = labels.get(option.value);
         const text = prefix ? `${prefix} · ${base}` : base;
         if (option.textContent !== text) option.textContent = text;

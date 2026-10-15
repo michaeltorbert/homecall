@@ -51,6 +51,15 @@ test('verified Southern Mississippi alias matches Auburn without fuzzy opponent 
  assert.equal(matchEvent([event],'Auburn',{start:base,opponent:'Southern Mississippi'}),event);
  assert.equal(matchEvent([event],'Auburn',{start:base,opponent:'Mississippi'}),null);
 });
+test('verified Boston alias (issue #44): the Duke catalog "Boston" matches provider Boston College only',()=>{
+ // Public Duke DTOs: catalog start 12:34 PM EDT; provider TBD event dated 04:00Z the same day.
+ const event={id:'401858279',start:Date.parse('2026-10-31T04:00:00Z'),season:2026,teams:['Duke','Boston College'],teamIds:['150','103']};
+ const game={start:Date.parse('2026-10-31T16:34:00Z'),opponent:'Boston'};
+ assert.equal(matchEvent([event],'Duke',game,'150'),event);
+ assert.equal(matchEvent([event],'Duke',{...game,opponent:'Boston College'},'150'),event);
+ for(const opponent of ['Boston University','BC','Bostonia']) assert.equal(matchEvent([event],'Duke',{...game,opponent},'150'),null,opponent);
+ assert.equal(matchEvent([{...event,teams:['Duke','Boston University']}],'Duke',game,'150'),null,'the alias is exact in both directions');
+});
 
 test('play ordering preserves provider encounter order without assuming IDs encode chronology',()=>{
  const ids=['a10','10','02','9007199254740993','2','a2','001','9007199254740992','1','9'];

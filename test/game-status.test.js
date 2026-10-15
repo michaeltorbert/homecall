@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameStatus, validateStatusSnapshot, validateScoreboard, statusSeasons, gameStatuses, gameMatches, STATUS_LABELS } from '../src/game-status.js';
+import { createGameStatus, validateStatusSnapshot, validateScoreboard, statusSeasons, gameStatuses, gameMatches, gameKickoffs, STATUS_LABELS } from '../src/game-status.js';
 import { metadataGateway } from '../lib/metadata-gateway.mjs';
 import { footballSeason } from '../src/sync-mapping.js';
 const DUKE = '2903e5f6-960e-4954-a3ec-f7754e78660f', GT = '410422f0-663f-4e3d-82e2-787d954ae29d';
@@ -17,11 +17,11 @@ const envelope = (season, events, { ageMs = 0, teamId = '150' } = {}) => ({ sche
 const providerTeams = [{ id: '150', name: 'Duke', homestreamId: DUKE }, { id: '59', name: 'Georgia Tech', homestreamId: GT }];
 const standard = { 'sync/teams': providerTeams, 'sync/status/150/2026': envelope(2026, [ev('101', G1, 'completed'), ev('102', G2, 'upcoming')]), 'sync/status/150/2025': envelope(2025, [ev('201', G5, 'live')]) };
 function harness({ read, enabled = () => true, onUpdate } = {}) {
-  const h = { wall: 1_000_000, mono: 1_000_000, timers: [], timeouts: [], updates: [], calls: [], signals: [] };
+  const h = { wall: 1_000_000, mono: 1_000_000, timers: [], timeouts: [], updates: [], kickoffs: [], calls: [], signals: [] };
   h.status = createGameStatus({
     read: (path, options) => { h.calls.push(path); h.signals.push(options.signal); return read(path, options); },
     enabled: () => enabled(), clock: () => ({ wall: h.wall, mono: h.mono }),
-    onUpdate: labels => { h.updates.push(Object.fromEntries(labels)); onUpdate?.(labels); },
+    onUpdate: (labels, kickoffs) => { h.updates.push(Object.fromEntries(labels)); h.kickoffs.push(Object.fromEntries(kickoffs)); onUpdate?.(labels, kickoffs); },
     setTimer: (fn, ms) => { const timer = { fn, ms, at: h.wall, cancelled: false, fired: false }; h.timers.push(timer); return timer; },
     clearTimer: timer => { if (timer) timer.cancelled = true; },
     timeout: () => { const controller = new AbortController(); h.timeouts.push(controller); return controller.signal; }
@@ -69,6 +69,54 @@ test('gameMatches exposes the one-to-one event behind each label without changin
   assert.deepEqual([...gameMatches([G2, twin], 'Duke', snapshot(events)).values()], [null, null], 'two catalog games cannot both claim one event');
   assert.equal(gameMatches([G2], 'Duke', snapshot([ev('102', G2, 'unknown')])).get('g2').id, '102', 'the match itself does not depend on the status label');
   assert.equal(gameStatuses([G2], 'Duke', snapshot([ev('102', G2, 'unknown')])).get('g2'), 'unavailable');
+});
+// Issue #44 kickoff confidence. See KICKOFF-TIMES.md for the source rule.
+test('optional kickoff: confirmed and tbd are kept; any other value is dropped while its event and status stay valid', () => {
+  const odd = ['TBD', 'provisional', true, null, ''];
+  const events = validateStatusSnapshot(envelope(2026, [{ ...ev('101', G1, 'completed'), kickoff: 'confirmed' }, { ...ev('102', G2, 'unknown'), kickoff: 'tbd' },
+    ...odd.map((kickoff, i) => ({ ...ev(String(103 + i), G2, 'upcoming'), kickoff })), ev('108', G2, 'upcoming')]), { teamId: '150', season: 2026 });
+  assert.deepEqual(events.map(e => [e.id, e.status, e.kickoff]), [['101', 'completed', 'confirmed'], ['102', 'unknown', 'tbd'], ...odd.map((_, i) => [String(103 + i), 'upcoming', undefined]), ['108', 'upcoming', undefined]]);
+  for (const event of events.slice(2)) assert.deepEqual(Object.keys(event), ['id', 'start', 'teams', 'teamIds', 'season', 'status']);
+  const [live] = validateStatusSnapshot(envelope(2026, [{ ...ev('110', G2, 'live'), scoreboard: { phase: 'halftime', period: 2 }, kickoff: 'confirmed' }]), { teamId: '150', season: 2026 });
+  assert.deepEqual(Object.keys(live), ['id', 'start', 'teams', 'teamIds', 'season', 'status', 'scoreboard', 'kickoff']);
+});
+test('gameKickoffs: tbd from a unique match; confirmed only at the exact catalog start; everything else absent', () => {
+  const snapshot = events => new Map([[2026, { providerId: '150', events }]]);
+  // Public Duke values: the catalog lists "Boston" at 12:34 PM EDT; the provider lists Boston College as TBD on its 04:00Z date.
+  const BC = { id: 'bc', opponent: 'Boston', start: Date.parse('2026-10-31T16:34:00Z') };
+  const tbd = { id: '401858279', start: Date.parse('2026-10-31T04:00:00Z'), teams: ['Duke', 'Boston College'], teamIds: ['150', '103'], season: 2026, status: 'upcoming', kickoff: 'tbd' };
+  assert.deepEqual(Object.fromEntries(gameKickoffs([BC], 'Duke', snapshot([tbd]))), { bc: 'tbd' }, 'TBD does not need the start to agree');
+  assert.equal(gameStatuses([BC], 'Duke', snapshot([tbd])).get('bc'), 'upcoming');
+  const kickoffs = (games, events) => Object.fromEntries(gameKickoffs(games, 'Duke', snapshot(events)));
+  const confirmed = (game, start = game.start) => ({ ...ev('102', game, 'upcoming', { start }), kickoff: 'confirmed' });
+  assert.deepEqual(kickoffs([G2], [confirmed(G2)]), { g2: 'confirmed' });
+  // SYNTHETIC: a legitimate 12:34 PM EST kickoff is an ordinary confirmed time.
+  const G34 = { id: 'g34', opponent: 'Clemson', start: Date.parse('2026-11-21T17:34:00Z') };
+  assert.deepEqual(kickoffs([G34], [confirmed(G34)]), { g34: 'confirmed' });
+  assert.deepEqual(kickoffs([G2], [confirmed(G2, G2.start + 60000)]), {}, 'a confirmed provider time that differs from the catalog confirms nothing');
+  assert.equal(gameStatuses([G2], 'Duke', snapshot([confirmed(G2, G2.start + 60000)])).get('g2'), 'upcoming', 'the mismatch leaves status alone');
+  assert.deepEqual(kickoffs([G2], [{ ...ev('102', G2, 'unknown'), kickoff: 'tbd' }]), { g2: 'tbd' }, 'an unknown status keeps TBD');
+  assert.deepEqual(kickoffs([G2], [ev('102', G2, 'upcoming')]), {}, 'a legacy event without kickoff');
+  assert.deepEqual(kickoffs([G2], [{ ...ev('102', G2, 'upcoming'), kickoff: 'tbd' },{ ...ev('103', G2, 'upcoming', { start: G2.start + 3600000 }), kickoff: 'tbd' }]), {}, 'ambiguous provider events');
+  assert.deepEqual(kickoffs([G2, { ...G2, id: 'g2-replay', start: G2.start + 3600000 }], [{ ...ev('102', G2, 'upcoming'), kickoff: 'tbd' }]), {}, 'duplicate catalog claims');
+  assert.deepEqual(Object.fromEntries(gameKickoffs([G2], 'Duke', new Map())), {}, 'no fresh snapshot');
+});
+test('kickoff confidence publishes beside labels from the same fresh data; a confidence-only change republishes; stale data clears it', async () => {
+  let kickoff = 'confirmed';
+  const h = harness({ read: table(path => path === 'sync/status/150/2026' ? envelope(2026, [{ ...ev('102', G2, 'upcoming'), kickoff }]) : standard[path]) });
+  h.status.setGames({ games: [G2], teamId: DUKE, school: 'Duke' });
+  assert.deepEqual([h.labels(), h.kickoffs.at(-1)], [{ g2: UNAVAILABLE }, {}], 'nothing is confirmed before the first status');
+  await flush();
+  assert.deepEqual([h.labels(), h.kickoffs.at(-1)], [{ g2: 'Upcoming' }, { g2: 'confirmed' }]);
+  const updates = h.updates.length;
+  await h.fire(h.pending()[0]);
+  assert.equal(h.updates.length, updates, 'unchanged labels and confidence are not republished');
+  kickoff = 'tbd'; await h.fire(h.pending()[0]);
+  assert.equal(h.updates.length, updates + 1, 'a confidence-only change republishes');
+  assert.deepEqual([h.labels(), h.kickoffs.at(-1)], [{ g2: 'Upcoming' }, { g2: 'tbd' }]);
+  for (let i = 0; i < 45; i++) { h.advance(1000); h.status.tick(); }
+  assert.deepEqual([h.labels(), h.kickoffs.at(-1)], [{ g2: UNAVAILABLE }, {}], 'stale data confirms nothing');
+  assert.equal(h.kickoffs.length, h.updates.length, 'every update carries both maps');
 });
 test('only the two most recent valid catalog seasons are tracked; January belongs to the prior season', () => {
   assert.deepEqual(statusSeasons([G1, G2, G3, G4, G5]), [2026, 2025]);

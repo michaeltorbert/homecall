@@ -239,13 +239,17 @@ test('missing or contested flags keep exact schema 1 keys; kickoff is independen
  assert.deepEqual(Object.keys(snapshot.events[6]),[...SCHEMA_1_EVENT,'scoreboard','kickoff']);
  assert.deepEqual(snapshot.events[6].scoreboard,{phase:'in-progress',period:2,clock:'10:00'});
 });
-test('stage A compatibility: the current frontend validator accepts envelopes with and without kickoff identically',()=>{
+// Stage A proved the pre-#44 validator ignored kickoff. The frontend now consumes it (issue #44 stage B):
+// core fields stay identical with and without flags, and only the optional confidence is added.
+test('frontend validation keeps core fields identical with and without kickoff and carries the normalized confidence',()=>{
  const flagged=normalizeStatusSnapshot(dukeSchedule(),now,{teamId:'150',season:2026});
  const bare=dukeSchedule();for(const e of bare.events){delete e.timeValid;delete e.competitions[0].timeValid;}
  const legacy=normalizeStatusSnapshot(bare,now,{teamId:'150',season:2026});
  for(const event of legacy.events) assert.deepEqual(Object.keys(event),SCHEMA_1_EVENT);
  assert.deepEqual(Object.keys(flagged),Object.keys(legacy));
- const accepted=validateStatusSnapshot(flagged,{teamId:'150',season:2026});
+ const accepted=validateStatusSnapshot(flagged,{teamId:'150',season:2026}),plain=validateStatusSnapshot(legacy,{teamId:'150',season:2026});
  assert.equal(accepted.length,7,'no flagged event is rejected');
- assert.deepEqual(accepted,validateStatusSnapshot(legacy,{teamId:'150',season:2026}));
+ assert.deepEqual(accepted.map(({kickoff,...event})=>event),plain,'core fields are unchanged');
+ assert.deepEqual(accepted.map(e=>e.kickoff),flagged.events.map(e=>e.kickoff));
+ for(const event of plain) assert.deepEqual(Object.keys(event),SCHEMA_1_EVENT,'a legacy envelope gains no kickoff');
 });
