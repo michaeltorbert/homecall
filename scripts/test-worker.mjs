@@ -53,6 +53,12 @@ const upstream = async request => {
     {id:'59',homeAway:'home',score:{value:17,displayValue:'17'},team:{id:'59',location:'Georgia Tech',abbreviation:'GT',logos:[{href:'https://a.espncdn.com/i/teamlogos/ncaa/500/59.png'}]}},
     {id:'150',homeAway:'away',score:{value:14,displayValue:'14'},team:{id:'150',location:'Duke',abbreviation:'DUKE',logos:[{href:'https://a.espncdn.com/i/teamlogos/ncaa/500/150.png'}]}}],
     status:{clock:449,displayClock:'7:29',period:2,type:{id:'2',name:'STATUS_IN_PROGRESS',state:'in',completed:false,description:'In Progress',detail:'7:29 - 2nd Quarter',shortDetail:'7:29 - 2nd'}}}]}]}, {headers:{Date:new Date().toUTCString(),Age:'1'}});
+  // SYNTHETIC kickoff confidence (issue #44) in the observed provider timeValid shape: an explicit 12:34 PM EDT row and a TBD row.
+  const pre = (detail, shortDetail) => ({clock:0,displayClock:'0:00',period:0,type:{id:'1',name:'STATUS_SCHEDULED',state:'pre',completed:false,description:'Scheduled',detail,shortDetail}});
+  const flagged = (id, date, timeValid, status, competitors) => ({id,date,timeValid,season:{year:2024},competitions:[{id,date,timeValid,status,competitors:competitors.map(([team,location]) => ({id:team,team:{id:team,location}}))}]});
+  if (url.pathname.endsWith('/schedule') && url.searchParams.get('season') === '2024') return FixtureResponse.json({team:{id:'150'},season:{year:2024},events:[
+    flagged('401600001','2024-10-26T16:34Z',true,pre('Sat, October 26th at 12:34 PM EDT','10/26 - 12:34 PM EDT'),[['150','Duke'],['103','Boston College']]),
+    flagged('401600002','2024-11-02T04:00Z',false,pre('11/2 - TBD','TBD'),[['154','Wake Forest'],['150','Duke']])]}, {headers:{Date:new Date().toUTCString(),Age:'1'}});
   if (url.pathname.endsWith('/schedule')) return FixtureResponse.json({team:{id:'150'},season:{year:2026},events:[{id:'401858255',date:'2026-10-10T19:30Z',season:{year:2026},competitions:[{id:'401858255',competitors:[{id:'150',team:{id:'150',location:'Duke'}},{id:'2390',team:{id:'2390',location:'Tulane'}}],
     status:{clock:0,displayClock:'0:00',period:0,type:{id:'1',name:'STATUS_SCHEDULED',state:'pre',completed:false,description:'Scheduled',detail:'Sat, October 10th at 3:30 PM EDT',shortDetail:'10/10 - 3:30 PM EDT'}}}]}]}, {headers:{Date:new Date().toUTCString(),Age:'1'}});
   if (url.pathname.includes('/games/')) return FixtureResponse.json({success:true,games:[]});
@@ -161,6 +167,17 @@ try {
   for (const leaked of ['espncdn','logos','abbreviation','homeAway','displayClock','2nd','In Progress']) assert.ok(!liveText.includes(leaked), leaked);
   assert.ok(Number.isSafeInteger(liveData.ageMs));
   assert.equal(calls, boardBefore + 1);
+  // Flag-free fixtures above keep the exact schema 1 event keys; explicit flags add only kickoff.
+  const kickoffBefore = calls;
+  const kickoffStatus = await request('/api/sync/status/150/2024', { headers: { Origin: origin } });
+  assert.equal(kickoffStatus.status, 200);
+  const kickoffText = await kickoffStatus.text(), kickoffData = JSON.parse(kickoffText);
+  assert.deepEqual(Object.keys(kickoffData), ['schemaVersion','teamId','season','checkedAt','ageMs','events'], 'schema 1 envelope is unchanged');
+  assert.deepEqual(kickoffData.events, [
+    {id:'401600001',start:Date.parse('2024-10-26T16:34:00Z'),teams:['Duke','Boston College'],teamIds:['150','103'],season:2024,status:'upcoming',kickoff:'confirmed'},
+    {id:'401600002',start:Date.parse('2024-11-02T04:00:00Z'),teams:['Wake Forest','Duke'],teamIds:['154','150'],season:2024,status:'upcoming',kickoff:'tbd'}]);
+  for (const leaked of ['timeValid','TBD','EDT','Scheduled']) assert.ok(!kickoffText.includes(leaked), leaked);
+  assert.equal(calls, kickoffBefore + 1);
   assert.equal((await request('/api/sync/teams', { headers: { Origin: 'null' } })).status, 403);
   assert.equal((await request('/api/sync/teams?host=evil')).status, 404);
   assert.equal((await request('/api/sync/%74eams')).status, 404);
@@ -210,6 +227,6 @@ try {
   assert.deepEqual([archive.schools.vt.status, archive.schools.vt.checkedAt, new URL(archive.schools.vt.items[0].url).pathname], ['stale', archivedAt, '/media/archive/vt/v0']);
   for (const leaked of ['audio.example', 'archive-player.example', 'archive-feed.example', 'school.example']) assert.ok(!archiveText.includes(leaked), leaked);
   console.log(JSON.stringify({ result: 'PASS', workerd: JSON.parse(readFileSync('node_modules/workerd/package.json')).version,
-    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'seven HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'synthetic live scoreboard in the unchanged schema 1 status envelope','per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility', 'scheduled refresh: per-school last-known-good retention with original time and concealed projection', 'Duke broadcast schedule: signed same-origin live entry, sanitized aged body, cache hit, America/New_York Intl'],
+    checks: ['private KV catalog projection and audio relay', 'native media cancellation closes upstream HTTP response', 'private catalog read-only on requests', 'upstream headers stripped', 'seven HTTP route families', 'array, plays and status body shapes', 'cache hit and age recomputation (plays and status)', 'status supported-team allowlist and minimized envelope', 'synthetic live scoreboard in the unchanged schema 1 status envelope', 'synthetic kickoff confidence from agreeing timeValid flags; flag-free fixtures keep exact keys', 'per-response CORS', 'full target and method rejection', 'restricted preflight', 'no credential forwarding', 'manual redirect rejection without following', 'HTML rejection', '2 MiB cap', 'AbortSignal.any/timeout and body cancellation', 'cache:no-store and credentials:omit runtime compatibility', 'scheduled refresh: per-school last-known-good retention with original time and concealed projection', 'Duke broadcast schedule: signed same-origin live entry, sanitized aged body, cache hit, America/New_York Intl'],
     limitation: 'Local workerd with fixture upstreams; no deployed cache, platform CPU, browser HLS or account entitlement proof.' }, null, 2));
 } finally { await mf.dispose(); }
