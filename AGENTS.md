@@ -11,3 +11,5 @@ Node.js 22.12+ required. GitHub Pages uses the static dist output.
 Do not commit local recordings, transcripts, handoff packets, credentials or generated output.
 Manual synchronization is the current product requirement. No camera/microphone or automatic alignment claim.
 Do not call component tests or source HTTP probes real phone/browser validation.
+
+For operator HTTP checks of public catalog endpoints, use ordinary `curl` as documented in [RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md#public-catalog-checks). Preserve curl's default request identity; a denied or challenged request is evidence to report, not a reason to change clients or request identity. Runtime HTTP clients are unaffected, and local JSON parsing is allowed.

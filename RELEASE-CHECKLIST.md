@@ -17,6 +17,28 @@ The Pages workflow publishes as soon as a commit lands on `main`; it does not wa
 5. If the release changes the Worker, deploy it from the merged tree with `npm run worker:deploy` and check the routes listed in historical Step 4, item 2. A documentation-only or frontend-only release has no Worker change and needs no Worker deployment.
 6. Confirm the served build matches the merge commit and the Worker version is the one expected (unchanged when there was no Worker change).
 
+### Public catalog checks
+
+Use ordinary `curl` for operator HTTP checks of the public catalog routes. This example checks the live projection; use the same procedure with `/api/catalog/archive` when checking the archive. It requires exactly HTTP 200 and valid JSON, prints only a short success summary, and removes its private temporary response file on exit:
+
+```sh
+(
+  set -eu
+  response_file=$(mktemp)
+  trap 'rm -f "$response_file"' EXIT
+  status=$(curl -fsS --max-time 20 --output "$response_file" --write-out '%{http_code}' 'https://homecall-metadata.homecall.workers.dev/api/catalog/live') || exit 1
+  if [ "$status" != 200 ]; then
+    printf 'Expected HTTP 200; got %s\n' "$status" >&2
+    exit 1
+  fi
+  node -e 'try { JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); console.log("HTTP 200; valid JSON") } catch { console.error("Response was not valid JSON"); process.exitCode = 1 }' "$response_file"
+)
+```
+
+For the specific check, inspect only its required public fields locally; confirm media URLs use the gateway where applicable. The current live-catalog contract expects seven sources. That expectation does not apply to the archive's entry count. Record each school's status, checked time, and counts when reviewing freshness; an old or missing check time is not evidence of a recent scheduled run. Do not print raw catalog bodies or private values.
+
+Keep curl's default user-agent and request headers. Do not follow redirects, retry, switch to another network client after a denial or challenge, add Origin or authentication headers, or change Cloudflare settings as part of this check. On a denied, challenged, rate-limited, malformed, or otherwise failed request, retain and report the result without changing request identity or trying another retrieval method. Local JSON parsing with Node or Python is allowed; the no-Python rule applies to network retrieval.
+
 Recorded release snapshot, October 7, 2026 (issue #4 release, [PR #23](https://github.com/michaeltorbert/homecall/pull/23), [issue #4 comment](https://github.com/michaeltorbert/homecall/issues/4#issuecomment-6044328539)). Later releases, including documentation-only Pages builds, change what is served, so verify the live targets before acting:
 
 - **Released:** Worker `a7d22be2-19dc-4c10-9097-47fda7716ab6`, Pages `0.4.0+bc6892c` (source `bc6892c`).
