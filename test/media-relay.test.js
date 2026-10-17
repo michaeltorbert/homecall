@@ -266,3 +266,25 @@ test('an origin-root playlist never mints a directory capability', async () => {
   assert.equal(directoryForm({ ...target, url: 'https://audio.example/index.m3u8', kind: 'hls' }), null);
   assert.deepEqual(directoryForm({ ...target, url: 'https://audio.example/live/index.m3u8', kind: 'hls' }), { directory: 'https://audio.example/live/', name: 'index.m3u8' });
 });
+
+// Fixed diagnostics never include provider locations or response bodies.
+test('relay failure diagnostics classify causes without disclosing targets or changing responses', async () => {
+  const cases = [
+    ['upstream-status', () => new Response('private provider detail', { status: 403 })],
+    ['redirect-target', () => new Response(null, { status: 302, headers: { Location: 'https://private.example/token?secret=value' } })],
+    ['icy-metadata', () => new Response('audio', { headers: { 'Content-Type': 'audio/mpeg', 'icy-metaint': '16000' } })],
+    ['content-encoding', () => new Response('audio', { headers: { 'Content-Type': 'audio/mpeg', 'Content-Encoding': 'gzip' } })],
+    ['content-type', () => new Response('private', { headers: { 'Content-Type': 'text/html' } })],
+    ['fetch', () => { throw new Error('https://private.example/token?secret=value'); }],
+  ];
+  for (const [stage, fetcher] of cases) {
+    const events = [];
+    const response = await relayMedia(request(), target, { fetcher, diagnostic: event => events.push(event) });
+    assert.equal(response.status, 502); assert.equal(await response.text(), 'Media unavailable');
+    assert.equal(events.length, 1); assert.equal(events[0].stage, stage);
+    assert.deepEqual(Object.keys(events[0]).sort(), ['stage', 'upstreamStatus']);
+    assert.doesNotMatch(JSON.stringify(events), /private|secret|https/);
+  }
+  const response = await relayMedia(request(), target, { fetcher: () => { throw Error(); }, diagnostic: () => { throw Error('logger failed'); } });
+  assert.equal(response.status, 502); assert.equal(await response.text(), 'Media unavailable');
+});
