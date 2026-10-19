@@ -103,6 +103,17 @@ function live(t, { mediaSession = true, games = { [GT]: { game: GT_GAME, list: G
   return h;
 }
 const SCORE = /^Live · ESPN data received .+ · Georgia Tech 17, Duke 14 · Q2 7:29$/;
+// Synthetic provider states for the harness's one catalog-bound GT game (not captured samples, and no
+// claim about manual selection, default game policy or provider availability).
+const gtStatus = (status, scoreboard) => () => statusEnvelope('59', 2026, [{ id: '401858255', start: GT_GAME.start, teams: ['Georgia Tech', 'Duke'], teamIds: ['59', '150'], season: 2026, status, ...(scoreboard && { scoreboard }) }]);
+const GT_STATIC = { title: 'Georgia Tech vs Duke', artist: 'Homecall · Listen · Georgia Tech · Homestream', album: 'Georgia Tech · Homestream', art: [TEAM_ART('gt')] };
+const VOLATILE = /Live|ESPN|Halftime|Q\d|OT\d|\d+, /;
+const stillPlaying = (h, starts, name) => {
+  assert.equal(h.player.starts.length, starts, `${name}: no player restart`);
+  assert.ok(h.player.audio && !h.player.audio.paused, `${name}: no transport stop`);
+  assert.equal(h.$('stop').disabled, false, `${name}: controls stay usable`);
+  assert.equal(h.timers.filter(x => !x.cancelled && !x.fired).at(-1).ms, 15000, `${name}: the current owner keeps polling on schedule`);
+};
 
 test('Listen GT: browsing never claims; Play freezes identity; score appears only while PCM output plays and strips on every non-playing state', async t => {
   const h = live(t);
@@ -188,6 +199,59 @@ test('Listen status failure only removes volatile data; audio keeps playing', as
   assert.equal(h.timers.filter(x => !x.cancelled && !x.fired).at(-1).ms, 30000);
   h.statusFail = false; await h.firePoll();
   assert.match(h.ms.metadata.title, SCORE);
+});
+test('Listen GT: one bound game moves from live through scoreless, halftime and period-only states to completed with no volatile remnants or transport change', async t => {
+  const h = live(t);
+  h.selectGT(); h.$('connect').click(); await flush();
+  h.player.update(PLAYING); await flush();
+  const LIVE_ARTIST = `Georgia Tech vs Duke · ${GT_STATIC.artist}`;
+  assert.match(h.ms.metadata.title, SCORE);
+  assert.deepEqual({ ...h.meta(), title: null }, { ...GT_STATIC, artist: LIVE_ARTIST, title: null });
+  for (const [name, status, title] of [
+    // Same normalized shape (period and clock, no scores) as the October 17 desktop observation; values are synthetic.
+    ['live period and clock without scores', gtStatus('live', { phase: 'in-progress', period: 2, clock: '2:05' }), /^Live · ESPN data received [^·]+ · Q2 2:05$/],
+    ['halftime with scores', gtStatus('live', { phase: 'halftime', period: 2, scores: { 150: 14, 59: 20 } }), /^Live · ESPN data received [^·]+ · Georgia Tech 20, Duke 14 · Halftime$/],
+    ['live period only with scores', gtStatus('live', { phase: 'in-progress', period: 3, scores: { 150: 21, 59: 20 } }), /^Live · ESPN data received [^·]+ · Georgia Tech 20, Duke 21 · Q3$/]
+  ]) {
+    const reads = h.statusReads();
+    h.status = status; await h.firePoll();
+    assert.equal(h.statusReads(), reads + 1, name);
+    assert.match(h.ms.metadata.title, title, name);
+    assert.deepEqual({ ...h.meta(), title: null }, { ...GT_STATIC, artist: LIVE_ARTIST, title: null }, `${name}: same source and GT art`);
+    stillPlaying(h, 1, name);
+  }
+  h.status = gtStatus('completed'); await h.firePoll();
+  assert.deepEqual(h.meta(), GT_STATIC, 'completed strips every volatile field');
+  const writes = h.ms.writes.length, reads = h.statusReads();
+  for (let i = 0; i < 3; i++) await h.firePoll();
+  assert.equal(h.statusReads(), reads + 3);
+  assert.deepEqual(h.meta(), GT_STATIC, 'repeated completed polls stay static');
+  assert.equal(h.ms.writes.length, writes, 'repeated completed polls publish nothing new');
+  assert.ok(!VOLATILE.test([h.ms.metadata.title, h.ms.metadata.artist, h.ms.metadata.album].join(' ')));
+  stillPlaying(h, 1, 'completed');
+  h.$('stop').click();
+  assert.equal(h.ms.metadata, null);
+  noControls(h.ms);
+});
+test('Listen GT: a game already completed at the first accepted poll stays static through polls and Stop/restart, never publishing Live', async t => {
+  const h = live(t);
+  h.status = gtStatus('completed');
+  h.selectGT();
+  for (const starts of [1, 2]) {
+    h.$('connect').click(); await flush();
+    const reads = h.statusReads();
+    h.player.update(PLAYING); await flush();
+    assert.equal(h.statusReads(), reads + 1, `start ${starts}: first poll`);
+    assert.deepEqual(h.meta(), GT_STATIC, `start ${starts}: first accepted poll`);
+    for (let i = 0; i < 3; i++) await h.firePoll();
+    assert.equal(h.statusReads(), reads + 4);
+    assert.deepEqual(h.meta(), GT_STATIC, `start ${starts}: repeated polls`);
+    stillPlaying(h, starts, `start ${starts}`);
+    h.$('stop').click();
+    assert.equal(h.ms.metadata, null, `start ${starts}: Stop clears`);
+  }
+  assert.ok(h.ms.writes.every(m => m === null || (m.title === GT_STATIC.title && !VOLATILE.test(m.artist))), 'Live was never published');
+  noControls(h.ms);
 });
 test('Listen radio, affiliates and the demo publish station or test-tone identity only, even while a live event exists', async t => {
   const h = live(t);
