@@ -115,7 +115,7 @@ Verification performed by the root:
 | PNG size | 7,901 bytes |
 | Dimensions / color type | 512 × 512, 8-bit RGB (color type 2), no alpha or `tRNS` |
 | Local served check (2026-10-07, release root) | `GET http://127.0.0.1:4179/now-playing/homecall-512.png` and `GET http://127.0.0.1:4179/homecall/now-playing/homecall-512.png`: both HTTP 200, `image/png`, 7,901 bytes, SHA-256 `51bcc5af2d693d8d4615329dd5c21384f3a9e32884ae3a2304a2ababf3431b85` |
-| Production Pages served check | Pending under BACKLOG NOW-PLAYING-RELEASE-01; not performed |
+| Production Pages served check (2026-10-19, ordinary `curl`) | `https://michaeltorbert.github.io/homecall/now-playing/homecall-512.png`: HTTP 200, `image/png`, 512 × 512, byte-identical to the repository file (SHA-256 `51bcc5af2d693d8d4615329dd5c21384f3a9e32884ae3a2304a2ababf3431b85`). The four team PNGs were checked the same way and also match the repository. |
 
 ## Derivation of the team images (performed by the coordinator, not the author)
 
