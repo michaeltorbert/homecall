@@ -14,7 +14,8 @@
     "worker:types": "wrangler types output/worker-configuration.d.ts",
     "test:worker": "node scripts/test-worker.mjs",
     "check:private": "node scripts/check-private-urls.mjs",
-    "worker:preview": "VITE_GATEWAY_ORIGIN=https://homecall-private-streams-preview.homecall.workers.dev npm run build && wrangler deploy --env preview"
+    "worker:preview": "VITE_GATEWAY_ORIGIN=https://homecall-private-streams-preview.homecall.workers.dev npm run build && wrangler deploy --env preview",
+    "check:home-screen-install": "node .github/scripts/check-home-screen-install.mjs src/vendor/home-screen-install esm"
   },
   "dependencies": {
     "hls.js": "^1.7.3",
