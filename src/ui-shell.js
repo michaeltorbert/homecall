@@ -1,6 +1,7 @@
 // Presentation shell around the existing controllers: the More menu, tool dialogs, disclosures,
 // takeover confirmations and read-only warning mirrors. It never starts, stops or owns audio.
 // Every function takes the document explicitly so tests can drive it inside any window.
+import { mount } from './vendor/home-screen-install/home-screen-install.mjs';
 const FOCUSABLE = 'button:not([disabled]), [href], select:not([disabled]), input:not([disabled]), textarea, summary';
 const openers = new WeakMap(), dismissers = new WeakMap(), wired = new WeakSet();
 const isOpen = dialog => !!dialog?.hasAttribute('open');
@@ -105,7 +106,16 @@ export function setDisclosure(doc, id, open, moveFocus = false) {
   if (moveFocus) (open ? panel.querySelector('[tabindex="-1"], h2') : toggle)?.focus();
 }
 
-export function setupShell({ doc, onMenuOpen = () => {} }) {
+// The vendored Add to Home Screen button, once per footer, outside the menu and tab panels. The
+// component alone decides visibility from the current display mode and owns its guide dialog.
+// A mount failure leaves the rest of the shell and playback setup running without the button.
+function mountHomeScreen(doc, mountFn) {
+  const footer = doc.querySelector('footer');
+  if (!footer || footer.querySelector(':scope > [data-home-screen-install]')) return null;
+  try { return mountFn(footer, { appName: 'Homecall' }); } catch { return null; }
+}
+
+export function setupShell({ doc, onMenuOpen = () => {}, mountHomeScreen: mountFn = mount }) {
   const $ = id => doc.getElementById(id);
   const button = $('more'), menu = $('menu');
   const items = () => [...menu.querySelectorAll('[role=menuitem]')].filter(item => !item.hidden && !item.disabled);
@@ -158,5 +168,6 @@ export function setupShell({ doc, onMenuOpen = () => {} }) {
     for (const source of doc.querySelectorAll('[data-warning-source]')) observer.observe(source, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['data-alert'] });
   }
   mirrorWarnings(doc);
-  return { openMenu, closeMenu, openDialog: id => openDialog($(id)), closeDialog: id => closeDialog($(id)) };
+  const homeScreen = mountHomeScreen(doc, mountFn);
+  return { openMenu, closeMenu, openDialog: id => openDialog($(id)), closeDialog: id => closeDialog($(id)), homeScreen };
 }
