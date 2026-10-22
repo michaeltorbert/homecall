@@ -36,24 +36,24 @@ test('only Duke has a schedule path; every other school stays hidden and makes n
 test('a known Duke broadcast shows a labeled countdown that ticks from absolute time and polls once a minute', async () => {
   const r = rig({ answers: [upcoming()] });
   r.countdown.setSchool('duke');
-  assert.equal(r.el.textContent, 'Duke network · Checking the broadcast schedule…'); assert.equal(r.el.hidden, false);
+  assert.equal(r.el.textContent, 'Next on Duke Sports Network · Checking the broadcast schedule…'); assert.equal(r.el.hidden, false);
   await settle();
   assert.deepEqual(r.reads.map(read => read.path), ['broadcast/schedule/duke']);
-  assert.equal(r.el.textContent, 'Duke network · Next broadcast starts in 17 min 41 s (Sat 2:00 PM) · Football: Visitor');
+  assert.equal(r.el.textContent, 'Next on Duke Sports Network · Next broadcast starts in 18 min (Sat 2:00 PM) · Football: Visitor');
   r.advance(1000); r.countdown.tick();
-  assert.equal(r.el.textContent, 'Duke network · Next broadcast starts in 17 min 40 s (Sat 2:00 PM) · Football: Visitor');
+  assert.equal(r.el.textContent, 'Next on Duke Sports Network · Next broadcast starts in 18 min (Sat 2:00 PM) · Football: Visitor');
   assert.deepEqual([...r.timers.values()].map(timer => timer.ms), [POLL_MS]);
   r.answers.push(upcoming({ event: { id: 'e1', label: 'Football: Visitor', kind: 'game', broadcastStart: START + 3_600_000 }, checkedAt: START + 1000 }));
   r.fire(); await settle();
   assert.equal(r.reads.length, 2);
-  assert.match(r.el.textContent, /starts in 59 min 59 s/, 'a provider delay is reflected on the next poll');
+  assert.match(r.el.textContent, /starts in 1 h 0 min/, 'a provider delay is reflected on the next poll');
 });
 test('reaching the start is neutral, refreshes once, stays reached on an identical snapshot and advances only when the provider moves the row', async () => {
   const soon = upcoming({ event: { id: 'e1', label: 'Football Radio Show', kind: 'show', broadcastStart: START + 2000 } });
   const r = rig({ answers: [soon, soon] });
   r.countdown.setSchool('duke'); await settle();
   r.advance(1000); r.countdown.tick(); r.advance(1000); r.countdown.tick();
-  assert.equal(r.el.textContent, 'Duke network · Scheduled broadcast start time reached for Football Radio Show. This does not confirm audio or game status.');
+  assert.equal(r.el.textContent, 'Next on Duke Sports Network · Scheduled broadcast start time reached for Football Radio Show. This does not confirm audio or game status.');
   assert.doesNotMatch(r.el.textContent, /live|playing|on air/i);
   await settle();
   assert.equal(r.reads.length, 2, 'one refresh at zero');
@@ -63,14 +63,14 @@ test('reaching the start is neutral, refreshes once, stays reached on an identic
   assert.match(r.el.textContent, /start time reached/);
   r.answers.push(upcoming({ event: { id: 'e2', label: 'Football: Visitor', kind: 'game', broadcastStart: START + 7_200_000 } }));
   r.fire(); await settle();
-  assert.match(r.el.textContent, /Next broadcast starts in 1 h 59 min/);
+  assert.match(r.el.textContent, /Next broadcast starts in 2 h 0 min/);
 });
 test('missing, ambiguous, stale, invalid and failed data are unknown, never an estimate or a kept countdown', async () => {
   const r = rig({ answers: [upcoming({ ageMs: 290_000 })] });
   r.countdown.setSchool('duke'); await settle();
   assert.match(r.el.textContent, /starts in/);
   r.advance(10_000); r.countdown.tick();
-  assert.equal(r.el.textContent, 'Duke network · Next broadcast time unknown.', 'source age plus elapsed time beyond five minutes');
+  assert.equal(r.el.textContent, 'Next on Duke Sports Network · Next broadcast time unknown.', 'source age plus elapsed time beyond five minutes');
   for (const [answer, text] of [[upcoming({ ageMs: null }), 'unknown'], [Error('502'), 'unknown'], [upcoming({ school: 'vt' }), 'unknown'],
     [{ schemaVersion: 1, school: 'duke', state: 'unknown', reason: 'uncertain', checkedAt: START, ageMs: 0 }, 'not confirmed'],
     [{ schemaVersion: 1, school: 'duke', state: 'unknown', reason: 'ambiguous', checkedAt: START, ageMs: 0 }, 'unknown'],
@@ -91,7 +91,7 @@ test('a wall-clock jump the monotonic clock does not share makes the countdown u
   const r = rig({ answers: [upcoming(), 'defer'] });
   r.countdown.setSchool('duke'); await settle();
   r.countdown.tick(); r.clock.wall += 3_600_000; r.clock.mono += 1000; r.countdown.tick();
-  assert.equal(r.el.textContent, 'Duke network · Next broadcast time unknown.');
+  assert.equal(r.el.textContent, 'Next on Duke Sports Network · Next broadcast time unknown.');
   assert.equal(r.reads.length, 2);
 });
 test('school changes and suspension discard late answers, abort requests and never overlap polls', async () => {
@@ -110,7 +110,7 @@ test('school changes and suspension discard late answers, abort requests and nev
   r.countdown.suspend();
   assert.equal(second.signal.aborted, true); assert.equal(r.timers.size, 0);
   second.resolve(upcoming()); await settle();
-  assert.equal(r.el.textContent, 'Duke network · Checking the broadcast schedule…');
+  assert.equal(r.el.textContent, 'Next on Duke Sports Network · Checking the broadcast schedule…');
   r.countdown.tick(); assert.equal(r.reads.length, 2, 'suspended ticks request nothing');
   r.answers.push(upcoming());
   r.countdown.resume(); await settle();
@@ -123,7 +123,7 @@ test('school changes and suspension discard late answers, abort requests and nev
   hidden.countdown.stop(); assert.equal(hidden.el.hidden, true); assert.equal(hidden.timers.size, 0);
 });
 test('remaining time formats compactly and the countdown line is not a live region', () => {
-  assert.deepEqual([formatRemaining(41_000), formatRemaining(1_061_000), formatRemaining(3_660_000), formatRemaining(90_000_000), formatRemaining(1)], ['41 s', '17 min 41 s', '1 h 01 min', '1 d 1 h', '1 s']);
+  assert.deepEqual([formatRemaining(41_000), formatRemaining(1_061_000), formatRemaining(3_660_000), formatRemaining(90_000_000), formatRemaining(1)], ['less than 1 min', '18 min', '1 h 1 min', '25 h 0 min', 'less than 1 min']);
   assert.equal(scheduleText('miami', null, START), '');
   assert.ok(MAX_AGE_MS === 300000 && POLL_MS === 60000);
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8'), line = html.match(/<p id="broadcast-next"[^>]*>/)?.[0];

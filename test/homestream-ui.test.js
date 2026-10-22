@@ -21,7 +21,8 @@ const reader=async url=>url.pathname.endsWith('/teams')?[{id:'team-id',name:'Geo
 test('discovery enables only advancing feed; unpublished selection stops playback and disables readiness',async t=>{
  const h=harness(t,{read:reader,probe:async()=> 'ready'});h.ui.setEnabled(true);await tick();
  assert.equal(h.ui.ready.id,'now');assert.match(h.$('game-note').textContent,/Live playlist/);
- h.$('game').value='future';await h.$('game').onchange();assert.equal(h.ui.ready,null);assert.match(h.$('game-note').textContent,/not been published/);assert.equal(h.stopped,2);
+ h.$('game').value='future';await h.$('game').onchange();assert.equal(h.ui.ready,null);assert.equal(h.$('game-note').textContent,'');assert.equal(h.stopped,2);
+ assert.equal(h.ui.selectedGame.id,'future');h.ui.setEnabled(false);assert.equal(h.ui.selectedGame,null,'a noncatalog school never inherits the previous school selection');
 });
 test('switching teams cancels slow discovery; late result cannot enable old feed',async t=>{
  let resolve;const h=harness(t,{read:()=>new Promise(r=>resolve=r),probe:async()=> 'ready'});h.ui.setEnabled(true);h.ui.setEnabled(false);resolve([{id:'gt',name:'Georgia Tech'}]);await tick();
@@ -89,7 +90,7 @@ test('onGames receives every game after options are built, before the default ch
  h.ui.setEnabled(true);await tick();
  assert.equal(seen.length,1);assert.deepEqual(atProbe,{calls:1,value:'now'});
  assert.deepEqual(seen[0].list,games.map(({id,opponent,start})=>({id,opponent,start})));assert.deepEqual(seen[0].meta,{teamId:'team-id'});
- assert.equal(seen[0].value,'');assert.deepEqual(seen[0].options.slice(0,1),['Finding the live or next game…']);assert.equal(seen[0].options.length,3);assert.match(seen[0].options[2],/feed not published$/);
+ assert.equal(seen[0].value,'');assert.deepEqual(seen[0].options.slice(0,1),['Finding the live or next game…']);assert.equal(seen[0].options.length,3);assert.doesNotMatch(seen[0].options[2],/feed not published/);
  assert.deepEqual(texts(h).length,2,'the placeholder leaves once a game is chosen');
  finishProbe('ready');await tick();assert.equal(h.ui.ready.id,'now');assert.equal(probes,1);
  h.ui.refresh();await tick();assert.equal(seen.length,2);assert.equal(seen[1].value,'now','an explicit refresh restores the kept game before onGames');
@@ -126,14 +127,14 @@ test('kickoff labels: confirmed keeps the catalog time, TBD shows the catalog da
  h.ui.setEnabled(true);await tick();
  const labels=()=>[...h.$('game').options].filter(o=>o.value).map(o=>o.textContent);
  // The warning precedes the time so a narrow closed select cannot show a bare time (390 px pixel finding).
- const unconfirmed=catalog.map(g=>`Unconfirmed time: ${when(g.start)} · vs ${g.opponent}${g.url?'':' · feed not published'}`);
+ const unconfirmed=catalog.map(g=>`Unconfirmed time: ${when(g.start)} · vs ${g.opponent}${g.url || g.start > Date.now()?'':' · feed not published'}`);
  assert.deepEqual(labels(),unconfirmed,'before any status every catalog time is unconfirmed');
  h.$('game').value='wm';await h.$('game').onchange();h.$('game').focus();
  const snapshot=()=>({values:[...h.$('game').options].map(o=>o.value),value:h.$('game').value,disabled:h.$('game').disabled,refresh:h.$('game-refresh').disabled,focus:h.w.document.activeElement===h.$('game'),ready:h.ui.ready?.id,stopped:h.stopped,rendered:h.rendered,probes,note:h.$('game-note').textContent});
  const before=snapshot();assert.deepEqual([before.value,before.ready,before.focus],['wm','wm',true]);
  h.ui.relabel(new Map([['bc','Upcoming'],['wm','Completed']]),new Map([['unc','confirmed'],['bc','tbd'],['late','tbd'],['bad','tbd'],['wm','provisional']]));
- assert.deepEqual(labels(),[`${when(catalog[0].start)} · vs North Carolina · feed not published`,`Upcoming · ${day(Date.UTC(2026,9,31))}, Time TBD · vs Boston · feed not published`,
-  `${day(Date.UTC(2026,10,14))}, Time TBD · vs Miami · feed not published`,'Date pending, Time TBD · vs Wake Forest · feed not published',`Completed · ${unconfirmed[4]}`]);
+ assert.deepEqual(labels(),[`${when(catalog[0].start)} · vs North Carolina · feed not published`,`Upcoming · ${day(Date.UTC(2026,9,31))}, Time TBD · vs Boston`,
+  `${day(Date.UTC(2026,10,14))}, Time TBD · vs Miami`,'Date pending, Time TBD · vs Wake Forest',`Completed · ${unconfirmed[4]}`]);
  assert.notEqual(day(Date.UTC(2026,10,14)),day(catalog[2].start),'the TBD date is the catalog date, not the start');
  assert.deepEqual(snapshot(),before);
  h.ui.relabel(new Map(),new Map());assert.deepEqual(labels(),unconfirmed,'missing or stale confidence reverts to unconfirmed');
@@ -194,7 +195,7 @@ test('the 4-second deadline settles an abort-insensitive status hook; the late r
  const h=chooser(t);h.ui.setEnabled(true);await tick();
  const [deadline]=h.deadline();assert.equal(deadline.ms,4000);deadline.fn();await tick();
  assert.equal(h.$('game').value,'next','with no status the next kickoff is chosen; LIVE is never inferred from the clock');
- assert.equal(h.$('game-note').textContent,'Live status could not be confirmed for the most recent game. This game’s feed has not been published. Refresh closer to the broadcast.');
+ assert.equal(h.$('game-note').textContent,'Live status could not be confirmed for the most recent game. ');
  assert.deepEqual([h.ui.status,h.ui.ready,h.$('game-refresh').disabled],['unavailable',null,false]);
  const before=h.view();
  h.calls[0].resolve(S({live:'live'}));await tick();

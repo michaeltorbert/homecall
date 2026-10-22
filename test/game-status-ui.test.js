@@ -1,3 +1,4 @@
+import { setupViews } from '../src/app-views.js';
 // Real Homestream catalog + Listen owner wiring + status controller in one page; only I/O, timers, the
 // player and the timing tools are fakes. Status labels are label-only: they never decide readiness.
 import test from 'node:test';
@@ -64,7 +65,7 @@ function harness(t) {
   w.URL.revokeObjectURL = url => { h.revoked.push(url); };
   w.setInterval = (fn, ms) => { h.intervals.push({ fn, ms }); return h.intervals.length; };
   w.__GATEWAY_ORIGIN__ = 'https://gateway.example';
-  Object.assign(w, { AbortController, metadataURL, mediaURL, configuredGatewayOrigin, gatewayOptions, readJSON, PlaybackMemory, SessionLog, teams, Player: FakePlayer, demoURL: () => 'blob:demo', setupArchive: options => { h.archive = options; }, defaultGame,
+  Object.assign(w, {setupViews, AbortController, metadataURL, mediaURL, configuredGatewayOrigin, gatewayOptions, readJSON, PlaybackMemory, SessionLog, teams, Player: FakePlayer, demoURL: () => 'blob:demo', setupArchive: options => { h.archive = options; }, defaultGame,
     createNowPlaying, nowPlayingArtwork, createScoreboard, listenTeams, resolveSources, officialLink, createListenSession, failureKind, TIMELINE_NOTICE, FALLBACK_NOTICE, applySchoolTheme, ...shell,
     setupGameTiming: () => ({ start() {}, stop() {}, reset() {}, invalidate() {}, render() {} }),
     checkPlaylist: url => { h.probes.push({ url, labels: h.labels() }); if (!h.holdProbe) return Promise.resolve('ready'); const gate = deferred(); h.releaseProbe = () => gate.resolve('ready'); return gate.promise; },
@@ -98,12 +99,12 @@ test('every Listen game option is labeled before the selected feed probe; a stat
   assert.deepEqual(h.probes[0].labels, ['Completed', 'Upcoming', 'Upcoming'], 'the first status round settles before the default game is probed');
   assert.equal(h.$('game').value, 'g2', 'the next upcoming game, not the completed one');
   assert.deepEqual(h.labels(), ['Completed', 'Upcoming', 'Upcoming']);
-  assert.match(h.texts()[2], /^Upcoming · .+ · vs Clemson · feed not published$/);
+  assert.match(h.texts()[2], /^Upcoming · .+ · vs Clemson$/);
   assert.match(h.texts()[1], /^Upcoming · .+ · vs Tulane$/);
   assert.equal(h.$('connect').disabled, true, 'a status label is not feed readiness: Play waits for the check');
   assert.equal(h.player.starts, 0);
   h.releaseProbe(); await flush();
-  assert.equal(h.$('connect').disabled, false); assert.equal(h.$('source-current').textContent, 'Will play · Game feed · timestamps checked once it loads');
+  assert.equal(h.$('connect').disabled, false); assert.equal(h.$('source-current').textContent, '');
 });
 test('status updates and failures change labels only; audio, source, selection, focus and readiness are untouched', async t => {
   const h = harness(t); h.boot(); await flush();
@@ -176,7 +177,7 @@ const release = async h => { for (const r of h.held.splice(0)) r(); await flush(
 test('a fresh LIVE game beats a nearer completed and a nearer upcoming game; its feed is then probed and Play stays manual', async t => {
   const h = harness(t); h.provider[150] = { g1: 'live', g2: 'upcoming', g3: 'upcoming' }; h.boot(); await flush();
   assert.equal(h.$('game').value, 'g1'); assert.equal(h.probes.length, 1); assert.match(h.probes[0].url, /\/g1$/);
-  assert.equal(h.player.starts, 0, 'no autoplay'); assert.equal(h.$('source-current').textContent, 'Will play · Game feed · timestamps checked once it loads');
+  assert.equal(h.player.starts, 0, 'no autoplay'); assert.equal(h.$('source-current').textContent, '');
 });
 test('when status cannot be read the deadline picks the next kickoff, says so, and Duke still names the network', async t => {
   const h = harness(t); h.statusFail = true; h.boot(); await flush();
@@ -215,7 +216,7 @@ test('a Source choice during the wait retires the default: no game, probe, sourc
   await release(h);
   assert.deepEqual([h.$('game').value, h.probes.length, h.$('feed').value, h.$('notice').textContent, h.player.starts], ['', 0, 'duke-wsjs', notice, 0]);
   assert.equal(h.$('game-note').textContent, 'Choose a game to check its feed.');
-  assert.equal(h.$('source-current').textContent, 'Will play · WSJS backup · affiliate · check coverage · manual alignment · chosen in Source');
+  assert.equal(h.$('source-current').textContent, 'Affiliate station · coverage may change; check that you hear the broadcast you want. Manual source · chosen in Source');
   assert.deepEqual(h.labels().slice(1), ['Completed', 'Upcoming', 'Upcoming'], 'labels still arrive');
 });
 test('the test tone, a Recordings takeover or a manual game during the wait each retire the default; Stop never revives it', async t => {
@@ -240,7 +241,7 @@ test('the test tone, a Recordings takeover or a manual game during the wait each
 test('a team change or hidden tab during the wait: late data cannot choose for the new school; hidden settles at once', async t => {
   let h = await deciding(t);
   h.$('team').value = 'vt'; h.$('team').onchange(); await release(h); deadline(h).forEach(x => x.fn()); await flush();
-  assert.deepEqual([h.probes.length, h.$('game-panel').hidden, h.$('source-current').textContent], [0, true, 'Will play · Network · manual alignment']);
+  assert.deepEqual([h.probes.length, h.$('game-panel').hidden, h.$('source-current').textContent], [0, true, '']);
   h = await deciding(t);
   h.setVisibility('hidden'); await flush();
   assert.equal(h.$('game').value, 'g2', 'a suspended first round settles the default without waiting for the deadline');
