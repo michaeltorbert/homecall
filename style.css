@@ -636,3 +636,7 @@ body[data-screen]:not([data-screen=player]) #live-panel { display: none; }
 .main-nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 4rem), 1fr)); }
 .main-nav button { white-space: normal; overflow-wrap: anywhere; }
 .app-shell { padding-bottom: calc(max(100px, 5rem + 40px) + env(safe-area-inset-bottom)); }
+/* Let long school names wrap inside the hero's text column without shrinking its identity art. */
+.hero-identity > div { flex: 1; min-width: 0; }
+.hero-identity img { flex-shrink: 0; }
+.hero-identity h1 { overflow-wrap: anywhere; }
