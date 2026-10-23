@@ -18,6 +18,8 @@ import { createGameStatus } from './game-status.js';
 import { createBroadcastCountdown } from './broadcast-countdown.js';
 import { TIMELINE_NOTICE, FALLBACK_NOTICE } from './hls-timeline.js';
 import { applySchoolTheme } from './school-theme.js';
+import { createTeamPreferences } from './team-preferences.js';
+import { createBrowseCatalog } from './browse-catalog.js';
 const $ = id => document.getElementById(id);
 let storage;
 try { storage = localStorage; } catch { /* Private browsing may deny access. */ }
@@ -27,8 +29,12 @@ let liveKey = null, savedDelay = null, sourcePaused = false;
 let teamList = listenTeams(), teamsLoaded = false;
 // Only a configured school is saved or restored, never a catalog:<id> school.
 const configured = new Set(teamList.keys());
+// selected is the team committed to the Player (mystream.team), not the listener's favorite.
 let selected = 'duke';
 try { const saved = storage?.getItem('mystream.team'); if (configured.has(saved)) selected = saved; } catch {}
+// The explicit favorite (Home) is separate; a saved or default Player team is never promoted to it.
+const prefs = createTeamPreferences({ storage, valid: key => configured.has(key) || /^catalog:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key),
+  onWarning: text => { $('storage-warning').textContent = text; } });
 let resetSourceDelay = false;
 let state = null, connecting = false, active = false, scrubbing = false, generation = 0, demo = null, pending = 0, specialPending = false;
 let previewText = '', previewId = '', needsCheck = true, sourceStatus = 'Stopped', attention = false;
@@ -40,9 +46,13 @@ let current = null, attempt = null, terminal = null, freshPending = null, timest
 // Transport progress text (buffering, stalled, trying a replacement) that later eligible output makes
 // obsolete; any other notice (warnings, timestamps, restoration, alignment) is never retired by output.
 let progressText = null, outputSeen = false, switchedFrom = null;
+// Where a restored saved delay came from, in the listener's words: the source, or game and source, and
+// when it was saved if not today. A saved setting is never presented as a TV alignment.
+let restoredFrom = null;
 const build = typeof __APP_BUILD__ === 'string' ? __APP_BUILD__ : 'development';
 $('build').textContent = build;
-const log = new SessionLog({ storage, build, onWarning: text => { $('storage-warning').textContent = text; } });
+// A real storage failure is global; routine retention and per-log limits belong to Session logs only.
+const log = new SessionLog({ storage, build, onWarning: (text, kind) => { $(kind === 'retention' || kind === 'log-limit' ? 'log-notice' : 'storage-warning').textContent = text; } });
 let historyRecords = [];
 const notice = text => { $('notice').textContent = text; };
 const progress = text => { notice(text); progressText = text; };
@@ -165,7 +175,8 @@ function update(value) {
     if (savedDelay === null || Math.abs(savedDelay - (state.resumeDelay ?? state.delay)) > 0.02) {
       savedDelay = state.resumeDelay ?? state.delay; if (liveKey) memory.save('live', liveKey, savedDelay);
     }
-    if (wasRestoring) notice(`Restored your ${state.delay.toFixed(1)}-second delay. Check alignment with your TV.`);
+    if (wasRestoring) notice(restoredFrom ? `Using the ${state.delay.toFixed(1)}-second delay you last used for ${restoredFrom}. It’s a saved setting, not a TV match; check alignment.`
+      : `Delay restored to ${state.delay.toFixed(1)} seconds. Check alignment with your TV.`);
   }
   render();
 }
@@ -191,8 +202,14 @@ function sourceLine(r, status) {
   const coverage = c.kind === 'affiliate' ? `Affiliate station · coverage may change; check that you hear the broadcast you want.${session.mode !== 'auto' ? ' Manual source · chosen in Source' : ''}` : '';
   const game = catalog.selectedGame;
   if (c.kind !== 'game' && game) {
-    const reason = catalog.ready?.id === game.id ? session.mode !== 'auto' ? 'Manual source instead of the selected game feed.' : 'The game feed was replaced by this source.' : 'Game audio isn’t available.';
-    return `${reason} Play starts ${c.station} live; it may carry another program.${coverage ? ` ${coverage}` : ''}`;
+    // The network actually playing (or about to) is one thing; the selected game's dedicated feed is another.
+    const feed = catalog.ready?.id === game.id ? session.mode !== 'auto' ? 'You chose this source instead of the selected game’s dedicated feed.' : 'The selected game’s dedicated feed stopped, so this source replaced it.'
+      : !game.url ? 'The selected game’s dedicated feed isn’t posted yet.'
+      : ['loading', 'checking'].includes(catalog.status) ? 'The selected game’s dedicated feed is still being checked.'
+      : 'The selected game’s dedicated feed couldn’t be confirmed.';
+    const now = status.startsWith('Playing') ? `Playing ${c.station} live.` : status.startsWith('Paused') ? `Paused on ${c.station} live.`
+      : active || connecting ? `Connecting to ${c.station} live.` : `Play starts ${c.station} live.`;
+    return `${now} ${feed} The network may carry other programming.${coverage ? ` ${coverage}` : ''}`;
   }
   if (coverage) return coverage;
   return session.mode !== 'auto' ? 'Manual source · chosen in Source' : '';
@@ -221,7 +238,8 @@ function render() {
   $('pause').disabled = connecting ? !!current?.demo : !ready || (restoring && player.context?.state === 'running' && !player.sourcePaused) || holding || specialPending;
   $('pause').textContent = holding ? 'Paused' : !connecting && (state?.paused || player.sourcePaused || player.context?.state !== 'running') ? 'Resume' : 'Pause';
   $('hold').disabled = holding ? !holdExitReady : !positionReady || specialPending || state.paused || !state.ingesting;
-  $('hold').textContent = holding ? 'Resume with this delay' : 'Pause to match TV';
+  $('hold').textContent = holding ? 'Resume with this delay' : 'Hold here';
+  $('hold-help').hidden = holding;
   $('resume-position').hidden = !ready || state?.canResumePosition === false || !state?.paused || restoring || holding || state.delay >= state.available - 0.01;
   $('resume-position').disabled = specialPending;
   $('resume-position-row').hidden = $('resume-position').hidden;
@@ -231,13 +249,18 @@ function render() {
   if (holding) setDisclosure(document, 'matching', true);
   $('match-close').hidden = holding;
   $('adjust-area').hidden = holding;
-  $('sync-help').textContent = holding ? 'When the TV reaches what you just heard, resume. The buffer keeps filling while audio is held.' : 'Call ahead of the picture? Pause at a distinct play, then resume when the TV shows it.';
+  $('sync-help').textContent = holding ? 'When the TV reaches what you just heard, resume. The buffer keeps filling while audio is held.' : '';
   $('confirm').disabled = !ready || restoring || holding || state.paused || !state.ingesting || pending > 0 || player.context?.state !== 'running';
-  $('confirm').textContent = log.confirmed && !needsCheck ? '✓ Marked aligned' : 'Sounds aligned';
+  $('confirm').textContent = log.confirmed && !needsCheck ? '✓ Marked aligned' : 'Mark aligned';
   $('alignment').textContent = log.confirmed && !needsCheck ? 'You marked it aligned' : 'Check alignment';
   $('scrub').disabled = !positionReady || holding || specialPending;
   $('live').disabled = !ready || player.context?.state !== 'running' || holding || specialPending;
-  document.querySelectorAll('[data-nudge]').forEach(button => { button.disabled = !positionReady || holding || specialPending; });
+  // A direction with nothing to move is disabled: no less delay at incoming audio, no more delay beyond
+  // the audio already kept. A partial move applies the smaller change and says so (command()).
+  const delayNow = state?.delay ?? 0, room = state ? state.available - delayNow : 0;
+  const movable = value => (value < 0 ? delayNow >= 0.01 : room >= 0.01);
+  document.querySelectorAll('[data-nudge], [data-skip]').forEach(button => { button.disabled = !positionReady || holding || specialPending || !movable(Number(button.dataset.nudge ?? button.dataset.skip)); });
+  $('skip-row').hidden = !active;
   $('delay').textContent = (state?.delay || 0).toFixed(2);
   $('buffer').textContent = state ? `${state.available.toFixed(0)} s available${state.paused ? ' · audio paused' : ''}` : 'History fills as you listen';
   if (!scrubbing) {
@@ -299,15 +322,66 @@ function rebuildSources() {
   $('feed').replaceChildren(...options.map(([value, text, title]) => { const option = document.createElement('option'); option.value = value; option.textContent = text; option.title = title; return option; }));
   $('feed').value = session.mode; $('feed-picker').hidden = false;
 }
-function teamChanged() {
+// game: an explicit catalog game for this team, committed only if the freshly loaded list contains it.
+function teamChanged({ game = '' } = {}) {
   disconnect(); selected = $('team').value;
   session.setMode('auto'); resetSourceDelay = false; resetAlignment();
   if (configured.has(selected)) try { storage?.setItem('mystream.team', selected); } catch {}
-  catalog.setEnabled(!!currentTeam().catalogId);
+  catalog.setEnabled(!!currentTeam().catalogId, { game });
   rebuildSources(); showSource(); notice(''); render();
   countdown.setSchool(selected);
-  // The visible view's committed school owns the appearance; Recordings applies its own school.
-  if (nav?.mode !== 'archive') applySchoolTheme(document.documentElement, selected);
+  applyTheme();
+}
+// The visible screen's school owns the appearance: Home shows the favorite (neutral without one), a
+// Team page its browsed school, Recordings its own school, and every other screen the Player's team.
+function applyTheme(screen = views?.screen ?? 'home') {
+  if (screen === 'recordings' || nav?.mode === 'archive') return;
+  applySchoolTheme(document.documentElement, screen === 'home' ? prefs.favorite : screen === 'team' ? views?.browsed ?? selected : selected);
+}
+// One guarded listening intent from Home, a Team page or Schedule: exactly one school and, optionally,
+// one source on it. source is null for the team itself (Automatic and its backup chain, as Home has
+// always done), 'network' for the named network row, or 'game' for one catalog game's dedicated feed.
+// A single prompt covers the takeover; Cancel changes nothing. A newer intent supersedes an older one,
+// and a requested game is revalidated by the catalog's own fresh load, so a canceled or superseded
+// response can never commit a team, game or source. Audio starts only inside this click and only for a
+// source that has already resolved; a game feed still being checked waits for Play.
+let intent = 0;
+// What is actually playing (or connecting), not what is selected: team, candidate kind, source and game.
+function playingNow() {
+  if (!(active || connecting) || !current || current.demo) return null;
+  return { team: selected, kind: current.kind, sourceId: current.sourceId, gameId: current.game?.id ?? null };
+}
+function listen(key, gameId = null, source = gameId ? 'game' : null) {
+  const team = teamList.get(key);
+  if (!team) return;
+  // A school without a catalog game feed plays its network first under Automatic; only a school that
+  // could also play a dedicated feed needs the network chosen explicitly.
+  const network = source === 'network' && team.radio && team.catalogId ? teams[key]?.sourceId ?? null : null;
+  const token = ++intent, same = key === selected, now = playingNow(), busy = active || connecting;
+  const settled = same && (source === 'game' ? now?.kind === 'game' && now.gameId === gameId
+    : network ? now?.sourceId === network
+    : source === 'network' ? now?.kind === 'network' : true);
+  if (settled && busy) { views?.go('player'); return; }
+  // Uses the Source picker's own path (fresh start, alignment reset); an unchanged mode just stops.
+  const enterMode = id => { if (session.mode === id) disconnect(); else { $('feed').value = id; sourceChanged(); } };
+  const commit = () => {
+    if (token !== intent) return;
+    if (!same) { $('team').value = key; teamChanged({ game: source === 'game' ? gameId : '' }); if (network) enterMode(network); }
+    else if (source === 'game') {
+      // The confirmed feed for this game plays through Automatic, keeping its backup chain; any other
+      // game, or one not confirmed right now, is rechecked by the catalog before Play.
+      if (catalog.ready?.id === gameId) enterMode('auto'); else catalog.choose?.(gameId);
+    } else if (network) enterMode(network);
+    else if (!settled) disconnect();
+    views?.commit('player');
+    if (!active && !connecting) play();
+  };
+  const enter = () => { if (token === intent) nav ? nav.select('live', { commit }) : commit(); };
+  if (!settled && busy) {
+    ask.ask({ title: `Listen to ${team.label}?`, text: 'The current audio stops. Your delay and TV alignment do not transfer.', action: 'Listen' }, enter);
+    return;
+  }
+  enter();
 }
 function sourceChanged() {
   const id = $('feed').value;
@@ -341,12 +415,16 @@ function startCandidate(candidate, { trigger = 'play', replacement = false, prev
   attempt = candidate.demo ? null : session.attempt();
   const token = attempt;
   current = candidate; active = connecting = true; timestampsNoticed = false; exhaustion = null;
-  liveKey = candidate.demo ? null : candidate.game ? `${candidate.sourceId}:${candidate.game.id}` : candidate.sourceId;
+  // Delay keys are per source, and per game for a game feed. Catalog-only schools share the catalog-game
+  // source ID, so their key also names the school's catalog identity; one school never restores another's.
+  liveKey = candidate.demo ? null : candidate.game ? `${candidate.sourceId}:${candidate.sourceId === 'catalog-game' ? `${team.catalogId}:` : ''}${candidate.game.id}` : candidate.sourceId;
   // A replacement or an explicitly chosen source starts at incoming audio; a stored delay never transfers.
   const fresh = !candidate.demo && (replacement || resetSourceDelay || freshPending === candidate.sourceId);
   if (fresh) freshPending = candidate.sourceId;
-  savedDelay = liveKey ? fresh ? 0 : memory.read('live', liveKey)?.value ?? null : null;
+  const record = liveKey && !fresh ? memory.read('live', liveKey) : null;
+  savedDelay = liveKey ? fresh ? 0 : record?.value ?? null : null;
   const restoreDelay = savedDelay ?? 0;
+  restoredFrom = restoreDelay > 0 ? `${candidate.game ? `${team.name} vs ${candidate.game.opponent} on ` : ''}${candidate.station}${savedOn(record?.savedAt)}` : null;
   log.start(selected, candidate.sourceId, candidate.demo ? 'demo' : 'live', $('provider').value, $('output').value, { trigger, previousSourceId: previous?.sourceId });
   sourceStatus = 'Connecting';
   if (replacement && previous) { switchedFrom = previous.station; progress(`${previous.station} could not play. Trying ${candidate.station}…`); } else notice('');
@@ -373,13 +451,19 @@ function startCandidate(candidate, { trigger = 'play', replacement = false, prev
     if (!candidate.demo) { resetSourceDelay = false; if (freshPending === candidate.sourceId) freshPending = null; }
     connecting = false;
     if (candidate.demo) notice('Test tone: a beep each second, higher every fifth.');
-    else if (restoreDelay > 0) notice(`Restoring your saved ${restoreDelay.toFixed(1)}-second delay. Use Incoming audio in Match my TV to skip the wait.`);
+    else if (restoreDelay > 0) notice(`Restoring the ${restoreDelay.toFixed(1)}-second delay you last used for ${restoredFrom}. Use Incoming audio in Match my TV to skip the wait.`);
     else if (!replacement) notice('');
     render();
   }, error => {
     if (mine !== generation || (!candidate.demo && !session.current(token))) return;
     startFailed(candidate, error);
   });
+}
+// ' (saved Oct 16)' for a setting saved before today; nothing for today or an unknown time.
+function savedOn(at) {
+  if (!Number.isFinite(at)) return '';
+  const day = new Date(at);
+  return day.toDateString() === new Date().toDateString() ? '' : ` (saved ${day.toLocaleDateString([], { month: 'short', day: 'numeric' })})`;
 }
 // Startup failure classification: transport or availability advance at once; permission and local
 // engine failures keep this candidate pending for Play; an unsupported browser ends the intent.
@@ -603,6 +687,8 @@ $('live').onclick = () => {
   if (target != null) seekTo(target, 'live'); else command('live');
 };
 document.querySelectorAll('[data-nudge]').forEach(button => { button.onclick = () => command('nudge', Number(button.dataset.nudge)); });
+// Back 5 s adds delay (+5), Forward 5 s removes it (−5): the same guarded nudge, bounded by kept audio.
+document.querySelectorAll('[data-skip]').forEach(button => { button.onclick = () => command('nudge', Number(button.dataset.skip)); });
 $('scrub').onpointerdown = () => { scrubbing = true; };
 $('scrub').oninput = () => { scrubbing = true; $('scrub-label').textContent = `${Number($('scrub').value).toFixed(2)} s`; };
 $('scrub').onchange = () => { const value = Number($('scrub').value); scrubbing = false; command('delay', value); };
@@ -656,9 +742,10 @@ teamChanged(); refreshSessions(); render();
 const liveActive = () => active || connecting;
 nav = setupArchive({ stopLive: disconnect, liveActive, confirm: ask, selectedTeam: () => selected, memory, nowPlaying,
   onSchool: key => applySchoolTheme(document.documentElement, key), onNavigate: mode => views?.commit(mode === 'archive' ? 'recordings' : 'player') }) ?? null;
-views = setupViews({ doc: document, shell,
-  navigate: (screen, commit) => nav ? nav.select(screen === 'recordings' ? 'archive' : 'live', { commit }) : commit(),
-  selectTeam: key => { $('team').value = key; $('team').onchange(); },
+// Read-only browse lists for Team pages and the weekly Schedule; never the Player's catalog.
+const browse = createBrowseCatalog({ read: (path, options) => metadata(path, options) });
+views = setupViews({ doc: document, shell, prefs, browse, listen, onScreen: screen => applyTheme(screen),
+  navigate: (screen, commit, options = {}) => nav ? nav.select(screen === 'recordings' ? 'archive' : 'live', { commit, school: options.school }) : commit(),
   selectSource: id => { $('feed').value = id; $('feed').onchange(); }, play,
   snapshot: () => {
     const r = resolution(), team = currentTeam();
@@ -672,8 +759,11 @@ views = setupViews({ doc: document, shell,
       gameNote: team.catalogId ? $('game-note').textContent : '', schedule: $('broadcast-next').textContent, history: historyRecords,
       playDisabled: $('connect').disabled, playLabel: $('connect').textContent, active, noCatalog: !team.catalogId,
       refreshDisabled: $('game-refresh').disabled, reconnectDisabled: !((active && !connecting) || session.pending), official: officialLink(team, shown()),
+      officialFor: key => officialLink(teamList.get(key)), recordings: [...$('archive-team').options].map(option => option.value),
+      playing: playingNow(),
       games: [...(team.catalogId ? $('game').options : [])].filter(option => option.value).map(option => ({ id: option.value, label: option.textContent, selected: option.selected, disabled: $('game').disabled })),
       sources: [...$('feed').options].filter(option => option.value !== 'auto').map(option => ({ id: option.value, label: r.candidates.find(c => c.sourceId === option.value)?.station ?? option.textContent, description: option.title, selected: option.selected, disabled: option.disabled })) };
   }
 });
+prefs.subscribe(() => { applyTheme(); views?.update(); });
 loadTeams();

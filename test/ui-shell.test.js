@@ -31,7 +31,8 @@ test('index keeps every controller ID once, the signed control sets and no third
   assert.equal(doc.querySelectorAll('audio').length, 1, 'only the recordings element remains; Listen audio is owned by the PCM engine');
   assert.ok(doc.getElementById('matching').contains(doc.getElementById('timing-tools')), 'game timing lives in Match my TV');
   assert.equal(doc.getElementById('switch-notice').getAttribute('role'), 'status'); assert.equal(doc.getElementById('switch-notice').hasAttribute('data-warning-source'), false, 'the switch notice never replaces warnings');
-  assert.deepEqual([...doc.querySelectorAll('[data-nudge]')].map(b => Number(b.dataset.nudge)), [-5, -1, -0.25, 0.25, 1, 5]);
+  assert.deepEqual([...doc.querySelectorAll('[data-nudge]')].map(b => Number(b.dataset.nudge)), [-30, -5, -1, 1, 5, 30, -0.25, 0.25]);
+  assert.deepEqual([...doc.querySelectorAll('[data-skip]')].map(b => Number(b.dataset.skip)), [5, -5], 'main Back 5 s adds delay, Forward 5 s removes it');
   assert.equal(doc.querySelectorAll('[data-sync-nudge]').length, 0);
   assert.deepEqual([...doc.querySelectorAll('[data-replay-seek]')].map(b => Number(b.dataset.replaySeek)), [-15, -1, -0.25, 0.25, 1, 15]);
   assert.deepEqual([...doc.getElementById('replay-speed').options].map(o => o.value), ['0.75', '1', '1.25', '1.5', '2']);
@@ -126,13 +127,14 @@ test('disclosures swap the entry for the panel and Close returns focus to the en
 test('Homestream without a guard changes games and refreshes directly', async t => {
   const { metadataURL, mediaURL } = await import('../src/gateway.js');
   const { defaultGame } = await import('../src/game-choice.js');
+  const { validateGames } = await import('../src/homestream.js');
   const source = readFileSync(new URL('../src/homestream-ui.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace(/export function/g, 'function');
   const dom = new JSDOM(html, { url: 'https://example.test/homecall/', runScripts: 'outside-only' }); t.after(() => dom.window.close());
   const win = dom.window, get = id => win.document.getElementById(id);
   // 'now' kicks off in a minute, so it is the default next upcoming game.
   const games = [{ id: 'now', start: Date.now() + 6e4, url: 'https://gateway.example/media/game/team-id/now', opponent: 'Tennessee' }, { id: 'later', start: Date.now() + 864e5, url: null, opponent: 'Mercer' }];
   let reads = 0, stopped = 0;
-  Object.assign(win, { AbortController, metadataURL, mediaURL, defaultGame, __GATEWAY_ORIGIN__: 'https://gateway.example', checkPlaylist: async () => 'ready',
+  Object.assign(win, { AbortController, metadataURL, mediaURL, defaultGame, validateGames, __GATEWAY_ORIGIN__: 'https://gateway.example', checkPlaylist: async () => 'ready',
     readJSON: async url => { reads++; return url.pathname.endsWith('/teams') ? [{ id: 'team-id', name: 'Georgia Tech' }] : games; } });
   win.eval(source + ';window.setup=setupHomestream;');
   const ui = win.setup({ onChange: () => { stopped++; }, onReady: () => {} });

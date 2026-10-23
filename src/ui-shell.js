@@ -97,6 +97,13 @@ export function createConfirm(doc) {
   };
 }
 
+// A dialog whose Escape or platform close request carries a meaning (the favorite prompt's Skip).
+// fn receives the dialog and is responsible for closing it.
+export function onDismiss(dialog, fn) {
+  if (!dialog) return;
+  wireDialog(dialog); dismissers.set(dialog, fn);
+}
+
 // The visible entry button and its panel swap places; the panel's Close returns focus to it.
 export function setDisclosure(doc, id, open, moveFocus = false) {
   const panel = doc.getElementById(id), toggle = doc.querySelector(`[data-disclose="${id}"]`);
@@ -106,7 +113,8 @@ export function setDisclosure(doc, id, open, moveFocus = false) {
   if (moveFocus) (open ? panel.querySelector('[tabindex="-1"], h2') : toggle)?.focus();
 }
 
-// The vendored Add to Home Screen button, once per footer, outside the menu and tab panels. The
+// The vendored Add to Home Screen button, once per footer, outside the menu and tab panels. The footer
+// (About, build and installation) lives in the More screen, so routine listening screens stay clear. The
 // component alone decides visibility from the current display mode and owns its guide dialog.
 // A mount failure leaves the rest of the shell and playback setup running without the button.
 function mountHomeScreen(doc, mountFn) {

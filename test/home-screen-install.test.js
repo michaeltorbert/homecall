@@ -60,7 +60,8 @@ test('setupShell mounts one real button as the last footer item, outside the men
   const { ui, host, root, trigger, dialog } = shell(p);
   assert.ok(ui.homeScreen && typeof ui.homeScreen.open === 'function', 'the real vendor handle is returned');
   assert.equal(host.parentElement, doc.querySelector('footer')); assert.equal(doc.querySelector('footer').lastElementChild, host);
-  assert.equal(host.closest('header, main, [role=menu], [role=tabpanel], dialog'), null);
+  // The footer (About, build, install) lives at the end of More, outside the menu, header, players and dialogs.
+  assert.ok(host.closest('#more-view')); assert.equal(host.closest('header, [role=menu], [role=tabpanel], #live-panel, #archive-panel, dialog'), null);
   assert.equal(host.hidden, false);
   assert.equal(trigger.tagName, 'BUTTON'); assert.equal(trigger.textContent, 'Add to Home Screen');
   assert.equal(trigger.getAttribute('aria-haspopup'), 'dialog'); assert.equal(trigger.hasAttribute('role'), false, 'no menu semantics');
@@ -69,7 +70,7 @@ test('setupShell mounts one real button as the last footer item, outside the men
   assert.equal(doc.querySelector('footer').textContent, footerText, 'the footer text and #build are untouched');
   assert.ok($('build').parentElement === doc.querySelector('footer'));
   assert.deepEqual([...doc.querySelectorAll('#menu [role=menuitem]')].map(item => item.textContent.trim()), MENU);
-  assert.deepEqual([...doc.querySelectorAll('dialog')].map(d => d.id), ['confirm-dialog', 'help-dialog', 'context-dialog', 'logs-dialog', 'tone-dialog'],
+  assert.deepEqual([...doc.querySelectorAll('dialog')].map(d => d.id), ['confirm-dialog', 'help-dialog', 'context-dialog', 'logs-dialog', 'favorite-dialog', 'tone-dialog'],
     'the shell only wires its own light-DOM dialogs, never the component guide');
   const again = setupShell({ doc });
   assert.equal(doc.querySelectorAll('footer > [data-home-screen-install]').length, 1, 'mounted once per footer');

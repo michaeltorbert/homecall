@@ -36,13 +36,22 @@ export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null
   // Game broadcasts are aliases that open Listen at its team or game choice. Browsing never stops Listen
   // audio; leaving a loaded recording stops it, so that departure asks first.
   const tabs = ['listen', 'archive'], tabOf = name => (name === 'archive' ? 'archive' : 'listen');
-  function selectMode(next, { force = false, focus = null, commit = null } = {}) {
+  // school: open Recordings at this school (a Team page's shortcut) instead of the Player's team. Within
+  // Recordings, a different school with a loaded recording asks first, exactly like the School choice.
+  const hasSchool = key => [...$('archive-team').options].some(o => o.value === key);
+  function selectMode(next, { force = false, focus = null, commit = null, school = null } = {}) {
     if (next !== 'archive') next = 'live';
+    if (next === mode && next === 'archive' && school && hasSchool(school) && school !== committedSchool) {
+      const switchSchool = () => { $('archive-team').value = school; render(true); if (commit) commit(); else onNavigate?.(mode); };
+      if (!current || force) return switchSchool();
+      confirm.ask({ title: 'Change school?', text: 'The current recording stops; its position is saved.', action: 'Change school' }, switchSchool);
+      return;
+    }
     if (next === mode) { focusField(focus); if (commit) commit(); else onNavigate?.(mode); return; }
     const leavingRecording = mode === 'archive' && !!current;
     if (!force && leavingRecording) {
       confirm.ask({ title: 'Stop this recording?', text: 'The recording stops when you leave it. Your position is saved.', action: 'Stop and leave' },
-        () => { selectMode(next, { force: true, commit }); if (focus) focusField(focus); else if (!commit && !onNavigate) $(`${tabOf(mode)}-tab`).focus(); });
+        () => { selectMode(next, { force: true, commit, school }); if (focus) focusField(focus); else if (!commit && !onNavigate) $(`${tabOf(mode)}-tab`).focus(); });
       return;
     }
     mode = next;
@@ -55,7 +64,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null
     document.body.dataset.view = mode;
     $('live-panel').hidden = mode !== 'live';
     $('archive-panel').hidden = mode !== 'archive';
-    if (mode === 'archive') { $('archive-team').value = [...$('archive-team').options].some(o => o.value === selectedTeam()) ? selectedTeam() : 'duke'; render(true); }
+    if (mode === 'archive') { const key = school && hasSchool(school) ? school : selectedTeam(); $('archive-team').value = hasSchool(key) ? key : 'duke'; render(true); }
     else onSchool(selectedTeam());
     focusField(focus);
     if (commit) commit(); else onNavigate?.(mode);

@@ -1,5 +1,5 @@
-import { metadataURL, mediaURL } from './gateway.js';
-import { readJSON, checkPlaylist } from './homestream.js';
+import { metadataURL } from './gateway.js';
+import { readJSON, checkPlaylist, validateGames } from './homestream.js';
 import { defaultGame } from './game-choice.js';
 const messages = {
   unpublished: '',
@@ -8,7 +8,8 @@ const messages = {
   stalled: 'The playlist is not advancing. Refresh to check again.',
   unavailable: 'The feed could not be checked. Refresh to retry or use the official listening site.',
   catalog: 'The game catalog could not load. Refresh to retry.',
-  ready: 'Live playlist confirmed. Press Play, then match the audio to your TV.'
+  // State-neutral: the note stays on the Player while audio plays, so it states availability only.
+  ready: 'Live playlist confirmed: this game feed is advancing.'
 };
 // Why the Game choice is left neutral. Absence is claimed only when every listed game is freshly Completed.
 const choose = {
@@ -52,7 +53,7 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
   const $ = id => document.getElementById(prefix + id);
   // idle (disabled), loading, checking, ready or unavailable: what the owner may say before Play.
   // committed is the selected game of the catalog team committedTeam; it never carries to another team.
-  let controller, games = [], ready = null, enabled = false, committed = '', committedTeam = null, status = 'idle', caution = '';
+  let controller, games = [], ready = null, enabled = false, committed = '', committedTeam = null, status = 'idle', caution = '', requested = '';
   const optionGames = new WeakMap();
   const cancel = () => { controller?.abort(); controller = null; ready = null; };
   const invalidate = () => { try { onCatalogInvalidated?.(); } catch { /* Optional labels cannot block the catalog. */ } };
@@ -126,6 +127,8 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
   // initial: a team was enabled, so a default may be chosen. An explicit refresh only keeps a choice.
   async function load(initial) {
     if (!enabled) return;
+    // A requested game belongs to exactly this load; any later load, team or game change supersedes it.
+    const want = requested; requested = '';
     const refreshButton = $('game-refresh');
     const wantsFocus = !initial && document.activeElement === refreshButton;
     const signal = begin('refresh'), owner = epoch();
@@ -143,15 +146,11 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
       if (!team) throw Error('team-unavailable');
       const loaded = await read(api(`homestream/games/${encodeURIComponent(team.id)}`), { signal });
       if (signal.aborted) return;
-      if (!Array.isArray(loaded)) throw Error('catalog-invalid');
-      games = loaded.map(game => {
-        if (!game || !/^[A-Za-z0-9_-]+$/.test(game.id) || typeof game.opponent !== 'string' || !(game.start === null || Number.isFinite(game.start))) throw Error('catalog-invalid');
-        const url = game.url === null ? null : mediaURL(game.url, { origin: typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__, path: `/media/game/${team.id}/${game.id}` });
-        if (game.url !== null && !url) throw Error('catalog-invalid');
-        return { ...game, url };
-      });
+      games = validateGames(loaded, team.id, { origin: typeof __GATEWAY_ORIGIN__ === 'string' ? __GATEWAY_ORIGIN__ : '', allowLocal: typeof __GATEWAY_ALLOW_LOCAL__ === 'boolean' && __GATEWAY_ALLOW_LOCAL__ });
       // Only this team's own committed game is kept; a shared game ID under another school is not.
-      const kept = committedTeam === team.id ? committed : '';
+      // A game the listener explicitly asked for with this load (want) takes its place, and is
+      // revalidated against this fresh list; a withdrawn game is never guessed.
+      const kept = want || (committedTeam === team.id ? committed : '');
       committed = ''; committedTeam = team.id;
       $('game').replaceChildren();
       for (const g of games) {
@@ -216,7 +215,16 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
     get selectedGame() { return enabled ? games.find(game => game.id === committed) ?? null : null; },
     get status() { return status; },
     refresh,
-    setEnabled(value) { enabled = value; cancel(); invalidate(); status = 'idle'; $('game-panel').hidden = !value; if (value) load(true); },
+    // game: an explicit game ID the listener chose elsewhere (Team or Schedule); it replaces the default
+    // choice for this load only and commits only if the freshly loaded list still contains it.
+    setEnabled(value, { game = '' } = {}) { enabled = value; cancel(); invalidate(); status = 'idle'; requested = value && typeof game === 'string' ? game : ''; $('game-panel').hidden = !value; if (value) load(true); },
+    // An already-confirmed explicit game choice for the enabled team: a listed game commits now; one
+    // not in the loaded list reloads the catalog and commits only if the fresh list contains it.
+    choose(id) {
+      if (!enabled || typeof id !== 'string' || !id) return;
+      if (games.some(g => g.id === id) && status !== 'loading') { $('game').value = id; change(id); return; }
+      requested = id; load(false);
+    },
     stop() { controller?.abort(); controller = null; if (status === 'loading' || status === 'checking') status = 'unavailable'; $('game').disabled = !games.length; $('game-refresh').disabled = false; },
     // Text only: value, order, selection, disabled state, focus and readiness are untouched.
     // kickoffs maps game ID to 'confirmed' or 'tbd'; any other game shows its time as unconfirmed.

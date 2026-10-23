@@ -57,3 +57,15 @@ test('clear removes malformed own records too without touching unrelated site pr
  const {log}=fixture({storage:store});log.end();assert.equal(log.clear(),true);
  assert.equal(store.getItem(PREFIX+'broken'),undefined);assert.equal(store.getItem('other.preference'),'keep');
 });
+test('warnings carry their kind: retention and per-log limits are routine, storage failure is a real failure', () => {
+  const kinds = [];
+  const store = storage(); let id = 0;
+  const log = new SessionLog({ storage: store, id: () => `s${++id}`, utc: () => new Date(1700000000000 + id * 1000).toISOString(), maxSessions: 2, maxEvents: 3, onWarning: (text, kind) => kinds.push([kind, text]) });
+  for (let i = 0; i < 3; i++) { log.start('duke', 'duke-leanstream'); log.end(); }
+  assert.equal(kinds.find(([kind]) => kind === 'retention')?.[1], 'Older logs were removed; only the 2 most recent are kept. Export any you want to save.');
+  log.start('duke', 'duke-leanstream'); for (let i = 0; i < 5; i++) log.add('heartbeat');
+  assert.ok(kinds.some(([kind]) => kind === 'log-limit'));
+  const failing = new SessionLog({ storage: { get length() { return 0; }, key: () => null, getItem: () => null, setItem: () => { throw Error('quota'); }, removeItem() {} }, onWarning: (text, kind) => kinds.push([kind, text]) });
+  failing.start('duke', 'duke-leanstream');
+  assert.deepEqual(kinds.at(-1), ['storage', 'Log storage is unavailable. Keep this page open and share or download the log before leaving.']);
+});

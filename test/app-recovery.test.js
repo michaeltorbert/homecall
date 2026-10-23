@@ -17,6 +17,8 @@ import { TIMELINE_NOTICE, FALLBACK_NOTICE } from '../src/hls-timeline.js';
 import * as shell from '../src/ui-shell.js';
 import { createBroadcastCountdown } from '../src/broadcast-countdown.js';
 import { applySchoolTheme, schoolThemes, THEME_ROLES } from '../src/school-theme.js';
+import { createTeamPreferences } from '../src/team-preferences.js';
+import { createBrowseCatalog } from '../src/browse-catalog.js';
 globalThis.__GATEWAY_ORIGIN__='https://gateway.example';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const source=readFileSync(new URL('../src/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
@@ -57,8 +59,9 @@ function harness(t, catalogFactory, {storage:seed={},...extra}={}) {
  Object.assign(w,{setupGameTiming:options=>{fakeTiming.options=options;return fakeTiming;},setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,status:'unavailable',stop(){},setEnabled(){},relabel(){},refresh(){}}),
   setupViews,PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{},listenTeams,resolveSources,officialLink,createListenSession,failureKind,TIMELINE_NOTICE,FALLBACK_NOTICE,
   createGameStatus:()=>({setGames(){},clear(){},suspend(){},resume(){},tick(){},stop(){}}),createBroadcastCountdown:options=>{fakeCountdown.options=options;return fakeCountdown;},
-  createNowPlaying,nowPlayingArtwork,createScoreboard,metadataURL,configuredGatewayOrigin,gatewayOptions,readJSON:async()=>{throw Error('no metadata in recovery tests');},applySchoolTheme,...shell,...extra});
+  createNowPlaying,nowPlayingArtwork,createScoreboard,metadataURL,configuredGatewayOrigin,gatewayOptions,readJSON:async()=>{throw Error('no metadata in recovery tests');},applySchoolTheme,createTeamPreferences,createBrowseCatalog,...shell,...extra});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
+ w.localStorage.setItem('homecall.favoritePrompt','skipped');
  for(const [key,value] of Object.entries(seed))w.localStorage.setItem(key,value);
  w.URL.revokeObjectURL=()=>{};w.eval(source);const $=id=>w.document.getElementById(id);
  return {w,player,timing:fakeTiming,countdown:fakeCountdown,get catalog(){return catalog},$,prompt:()=>$('confirm-dialog').hasAttribute('open'),proceed:()=>$('confirm-continue').click(),dismiss:()=>$('confirm-cancel').click(),
@@ -280,7 +283,7 @@ test('Playing requires an actual audio element and context; buffered output with
 test('the main screen carries no generic idle or start advice; real results and the hold instruction stay where they belong',async t=>{
  const h=harness(t);assert.equal(h.$('notice').textContent,'');
  h.$('connect').click();assert.equal(h.$('notice').textContent,'');await settle();
- h.player.update({...PLAYING,restoring:35,available:10});assert.match(h.$('notice').textContent,/^Restoring your saved 35\.0-second delay/,'saved-delay restoration stays visible');
+ h.player.update({...PLAYING,restoring:35,available:10});assert.match(h.$('notice').textContent,/^Restoring the 35\.0-second delay you last used for Duke Sports Network\./,'saved-delay restoration stays visible and names its source');
  h.player.update(PLAYING);h.$('hold').click();await settle();h.player.update({...PLAYING,holding:true});
  assert.equal(h.$('notice').textContent,'','the hold instruction appears only in Match my TV');assert.match(h.$('sync-help').textContent,/When the TV reaches/);
  h.$('stop').click();assert.equal(h.$('notice').textContent,'');
@@ -299,13 +302,14 @@ test('hold opens matching, keeps its exits usable while restoring, and Close ret
  assert.equal(h.$('matching').hidden,false);assert.equal(h.$('match-close').hidden,true);
  assert.equal(h.$('hold').textContent,'Resume with this delay');assert.equal(h.$('hold').disabled,false);assert.equal(h.$('cancel').disabled,false);
  h.$('cancel').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'cancel',value:undefined});
- h.player.update(PLAYING);assert.equal(h.$('match-close').hidden,false);assert.equal(h.$('hold').textContent,'Pause to match TV');
+ h.player.update(PLAYING);assert.equal(h.$('match-close').hidden,false);assert.equal(h.$('hold').textContent,'Hold here');
 });
-test('direction groups keep production signs: Less delay sends negative nudges, More delay positive',async t=>{
+test('direction groups keep production signs: Less delay sends negative nudges, More delay positive; fine ¼ s stays available',async t=>{
  const h=harness(t);h.$('connect').click();await settle();h.player.update(PLAYING);
  const less=[...h.w.document.querySelectorAll('[aria-labelledby=less-delay] [data-nudge]')],more=[...h.w.document.querySelectorAll('[aria-labelledby=more-delay] [data-nudge]')];
- assert.deepEqual(less.map(b=>Number(b.dataset.nudge)),[-5,-1,-0.25]);assert.deepEqual(more.map(b=>Number(b.dataset.nudge)),[0.25,1,5]);
- for(const button of [...less,...more]){button.click();await settle();assert.deepEqual(h.player.lastCommand,{type:'nudge',value:Number(button.dataset.nudge)});
+ const fine=[...h.w.document.querySelectorAll('.fine-adjust [data-nudge]')];
+ assert.deepEqual(less.map(b=>Number(b.dataset.nudge)),[-30,-5,-1]);assert.deepEqual(more.map(b=>Number(b.dataset.nudge)),[1,5,30]);assert.deepEqual(fine.map(b=>Number(b.dataset.nudge)),[-0.25,0.25]);
+ for(const button of [...less,...more,...fine]){button.click();await settle();assert.deepEqual(h.player.lastCommand,{type:'nudge',value:Number(button.dataset.nudge)});
   assert.match(button.getAttribute('aria-label'),Number(button.dataset.nudge)<0?/^Reduce delay/:/^Add /);}
 });
 // Single-source team: exhausted recovery ends the intent (a multi-source team would fall back instead).
@@ -371,7 +375,8 @@ test('AC3 a playable feed without timestamps keeps the same audio and manual ali
  assert.equal(h.$('notice').textContent,TIMELINE_NOTICE.timestamps);assert.equal(h.player.starts.length,1);
  assert.equal(h.$('timing-tools').hidden,true);assert.equal(h.$('source-current').textContent,'');
  h.player.event('output-ready');assert.equal(h.$('switch-notice').hidden,true);
- for(const b of h.w.document.querySelectorAll('[data-nudge]'))assert.equal(b.disabled,false);
+ // At 0 s added delay there is no less delay to remove; adding delay and every other tool stay usable.
+ for(const b of h.w.document.querySelectorAll('[data-nudge], [data-skip]'))assert.equal(b.disabled,Number(b.dataset.nudge??b.dataset.skip)<0,b.dataset.nudge??b.dataset.skip);
  assert.equal(h.$('hold').disabled,false);assert.equal(h.$('live').disabled,false);
 });
 test('AC4 a startup transport failure on the game feed moves once to the network; the notice waits for real output',async t=>{
@@ -519,7 +524,7 @@ test('a saved configured school, catalog-only included, is restored and saved; c
 test('no game choice is saved: only the team, per-source delays and session logs are stored',async t=>{
  const h=harness(t,gameCatalog());h.$('team').value='gt';h.$('team').onchange();h.$('connect').click();await settle();
  const keys=[];for(let i=0;i<h.w.localStorage.length;i++)keys.push(h.w.localStorage.key(i));
- assert.ok(keys.every(key=>key==='mystream.team'||key.startsWith('homecall.position.')||key.startsWith('mystream.session.')),keys.join());
+ assert.ok(keys.every(key=>key==='mystream.team'||key.startsWith('homecall.position.')||key.startsWith('mystream.session.')||['homecall.favoriteTeam','homecall.favoritePrompt'].includes(key)),keys.join());
  assert.equal(h.w.localStorage.getItem('mystream.team'),'gt');
 });
 test('AC15 Source override: Automatic default; a manual choice survives Stop and Play and resets on Automatic, team or game change',async t=>{
@@ -565,7 +570,7 @@ test('F2 eligible output retires obsolete buffering and trying text; a replaceme
 });
 test('F2 output never retires independent warnings: restoration, interruption, missing timestamps and affiliate caution stay',async t=>{
  let h=harness(t);h.$('connect').click();await settle();
- assert.match(h.$('notice').textContent,/^Restoring your saved 35\.0-second delay/);h.player.event('output-ready');assert.match(h.$('notice').textContent,/^Restoring your saved/);
+ assert.match(h.$('notice').textContent,/^Restoring the 35\.0-second delay you last used/);h.player.event('output-ready');assert.match(h.$('notice').textContent,/^Restoring the 35\.0-second delay/);
  h.player.context.state='suspended';h.player.event('context-interrupted');h.player.context.state='running';h.player.event('context-restored');
  h.player.event('output-ready');assert.equal(h.$('notice').textContent,'Phone audio returned. Restoring playback; check alignment.');
  h=harness(t,gameCatalog());h.$('connect').click();await settle();h.player.ts='missing';h.player.update({...PLAYING,delay:0});h.player.event('output-ready');
@@ -634,10 +639,12 @@ const SAMPLE='5f0c2a1e-3b4d-4c6e-8f90-a1b2c3d4e5f6';
 const appearance=h=>{const root=h.w.document.documentElement;return {school:root.dataset.school??null,...Object.fromEntries(Object.entries(THEME_ROLES).map(([role,token])=>[role,root.style.getPropertyValue(token)]))};};
 const themed=key=>({school:key,...schoolThemes[key]});
 const neutral=Object.fromEntries([['school',null],...Object.keys(THEME_ROLES).map(role=>[role,''])]);
-test('the school theme follows only the committed Listen school; catalog-only schools reset every token to the same fallback',async t=>{
+test('the Player theme follows only the committed Listen school; catalog-only schools reset every token to the same fallback',async t=>{
  const list=[{id:'b3c33c46-a9e4-4e3b-9d5a-4fefb625f14c',name:'Virginia'},{id:'ffacbef1-e8a5-4872-9401-eff97cdf2c9c',name:'Auburn'},{id:SAMPLE,name:'Sample School'}];
  const h=harness(t,gameCatalog('unavailable'),{readJSON:async url=>{if(url.pathname.endsWith('/homestream/teams'))return list;throw Error('unexpected');}});await settle();
- assert.deepEqual(appearance(h),themed('duke'),'startup applies the committed school');
+ assert.deepEqual(appearance(h),neutral,'Home without a favorite is neutral, never the default Duke');
+ h.$('home-open').hidden=false;h.$('home-open').click();assert.equal(h.w.document.body.dataset.screen,'player');
+ assert.deepEqual(appearance(h),themed('duke'),'the Player applies its committed school');
  for(const key of ['miami','vt','gt','uva','auburn']){h.$('team').value=key;h.$('team').onchange();assert.deepEqual(appearance(h),themed(key),key);}
  h.$('team').value=`catalog:${SAMPLE}`;h.$('team').onchange();assert.deepEqual(appearance(h),neutral,'a catalog-only school never inherits Auburn');
  h.$('team').value='miami';h.$('team').onchange();assert.deepEqual(appearance(h),themed('miami'));
@@ -662,4 +669,146 @@ test('Recordings drives the appearance only through its callback; a Listen team 
  archive.onSchool('miami');mode='archive';
  h.$('team').value='gt';h.$('team').onchange();assert.deepEqual(appearance(h),themed('miami'),'the visible Recordings school keeps the theme');
  assert.equal(archive.selectedTeam(),'gt');archive.onSchool(archive.selectedTeam());assert.deepEqual(appearance(h),themed('gt'),'returning to Listen applies its committed school');
+});
+
+// ---------- Listening feedback #59–#68 (owner fixtures; not audio, phone or TV proof) ----------
+const route=(h,name)=>h.w.document.querySelector(`.main-nav [data-route=${name}]`).click();
+const openTeam=(h,key)=>{route(h,'teams');[...h.$('team-list').children].find(el=>el.dataset.key===key).querySelector('button').click();};
+const button=(h,list,label)=>[...h.$(list).querySelectorAll('button')].find(b=>b.textContent===label);
+const UVA='b3c33c46-a9e4-4e3b-9d5a-4fefb625f14c',DAY_MS=864e5;
+test('#59 a first visit asks for a favorite instead of showing Duke; Skip is remembered and the legacy Duke stays only the Player team',async t=>{
+ let h=harness(t,undefined,{storage:{'mystream.team':'duke','homecall.favoritePrompt':''}});
+ assert.equal(h.$('favorite-dialog').hasAttribute('open'),true,'the prompt opens on a first visit');
+ assert.equal(h.$('home-eyebrow').textContent,'No favorite team yet');assert.equal(h.$('home-title').textContent,'Pick your team');
+ assert.equal(h.$('home-play').hidden,true,'no implied Duke Play on Home');assert.deepEqual(appearance(h),neutral);
+ assert.equal(h.$('team').value,'duke','the saved Player team is unchanged');
+ h.$('favorite-skip').click();assert.equal(h.$('favorite-dialog').hasAttribute('open'),false);
+ assert.equal(h.w.localStorage.getItem('homecall.favoritePrompt'),'skipped');assert.equal(h.w.localStorage.getItem('homecall.favoriteTeam'),null);
+ assert.equal(h.$('home-choose').hidden,false,'Home still offers the choice');
+ h=harness(t,undefined,{storage:{'homecall.favoritePrompt':'skipped'}});assert.equal(h.$('favorite-dialog').hasAttribute('open'),false,'a skip never asks again');
+ h=harness(t,undefined,{storage:{'homecall.favoritePrompt':''}});
+ h.$('favorite-list').querySelector('[data-team=miami]').click();
+ assert.equal(h.w.localStorage.getItem('homecall.favoriteTeam'),'miami');assert.equal(h.$('home-title').textContent,'Miami Hurricanes');
+ assert.deepEqual(appearance(h),themed('miami'),'Home follows the favorite');assert.equal(h.$('team').value,'duke','choosing a favorite never changes the Player');
+ assert.equal(h.player.starts.length,0);
+});
+test('#68 browsing and starring another team during playback never touches audio, source, delay or the Player; Home stays honest',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();h.player.update(PLAYING);
+ const delay=h.w.localStorage.getItem('homecall.position.live.duke-leanstream');
+ openTeam(h,'miami');assert.equal(h.w.document.body.dataset.screen,'team');assert.equal(h.$('team-title').textContent,'Miami Hurricanes');
+ assert.match(h.$('team-live').textContent,/104\.3 WQAM/);assert.equal(button(h,'team-live','Listen').disabled,false);
+ assert.match(h.$('team-recordings-note').textContent,/Full broadcasts/);assert.equal(h.$('team-recordings').hidden,false);
+ h.$('team-star').click();assert.equal(h.$('team-star').getAttribute('aria-pressed'),'true');
+ assert.deepEqual([h.player.starts.length,!!h.player.audio,h.$('team').value,h.$('status').textContent,h.prompt()],[1,true,'duke','Playing',false]);
+ assert.equal(h.w.localStorage.getItem('homecall.position.live.duke-leanstream'),delay,'the saved offset is untouched');
+ route(h,'home');assert.equal(h.$('home-title').textContent,'Miami Hurricanes');
+ assert.match(h.$('home-mismatch').textContent,/^Duke Sports Network is playing in the Player \(Playing\)\./);
+ assert.equal(h.$('home-play').textContent,'Listen to Miami');assert.equal(h.$('home-game-card').hidden,true,'Duke’s game card is not shown as the favorite’s');
+ assert.equal(h.$('owner-strip').hidden,false,'the actual audio stays reachable');
+});
+test('#68 a cross-team listen is one guarded intent: Cancel changes nothing, a newer request supersedes, Continue starts exactly that team in the click',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();h.player.update(PLAYING);
+ openTeam(h,'miami');button(h,'team-live','Listen').click();assert.equal(h.prompt(),true);
+ h.dismiss();assert.deepEqual([h.$('team').value,h.player.starts.length,!!h.player.audio,h.w.document.body.dataset.screen],['duke',1,true,'team']);
+ button(h,'team-live','Listen').click();assert.equal(h.prompt(),true);
+ openTeam(h,'vt');button(h,'team-live','Listen').click();assert.match(h.$('confirm-title').textContent,/Virginia Tech/,'the newer request replaced the older prompt');
+ h.proceed();assert.equal(h.$('team').value,'vt');assert.equal(h.player.starts.length,2);assert.equal(h.player.starts[1].url,teams.vt.url);
+ assert.equal(h.w.document.body.dataset.screen,'player');assert.equal(h.w.localStorage.getItem('mystream.team'),'vt');
+});
+test('#68 a game listen names the school and game for the catalog to revalidate, and never starts an unchecked feed',async t=>{
+ let fake;const recording=callbacks=>(fake={ready:null,status:'unavailable',enabled:[],callbacks,setEnabled(value,options){this.enabled.push([value,options?.game??''])},stop(){},relabel(){},refresh(){}});
+ const games=[{id:'g9',opponent:'Duke',start:Date.now()+DAY_MS,url:`https://gateway.example/media/game/${UVA}/g9`},{id:'g8',opponent:'Navy',start:Date.now()+2*DAY_MS,url:null}];
+ const h=harness(t,recording,{readJSON:async url=>{if(url.pathname.endsWith(`/homestream/games/${UVA}`))return games;throw Error('none');}});
+ openTeam(h,'uva');await flush();
+ assert.match(h.$('team-live-note').textContent,/No network stream is configured for Virginia/);assert.equal(h.$('team-live').children.length,0,'no borrowed network');
+ assert.equal(h.$('team-recordings').hidden,true);assert.match(h.$('team-recordings-note').textContent,/aren’t provided for Virginia/);
+ const rows=[...h.$('team-games').children];assert.deepEqual(rows.map(r=>r.querySelector('strong').textContent),['vs Duke','vs Navy']);
+ assert.equal(rows[1].querySelector('button'),null,'an unposted feed offers no Listen');
+ rows[0].querySelector('button').click();
+ assert.deepEqual(fake.enabled.at(-1),[true,'g9']);assert.equal(h.$('team').value,'uva');assert.equal(h.player.starts.length,0,'the feed check comes first');
+ assert.equal(h.w.document.body.dataset.screen,'player');
+});
+test('#60 catalog-only schools keep separate saved delays for the same game ID',async t=>{
+ const A='00000000-0000-4000-8000-00000000000a',B='00000000-0000-4000-8000-00000000000b';
+ const h=harness(t,gameCatalog(),{readJSON:async()=>[{id:A,name:'Alpha State'},{id:B,name:'Beta State'}]});await settle();
+ h.$('team').value=`catalog:${A}`;h.$('team').onchange();h.$('connect').click();await settle();h.player.update(PLAYING);
+ assert.equal(JSON.parse(h.w.localStorage.getItem(`homecall.position.live.catalog-game:${A}:g1`)).value,35);
+ h.$('team').value=`catalog:${B}`;h.$('team').onchange();h.proceed();h.$('connect').click();await settle();
+ assert.equal(h.player.starts.at(-1).delay,0,'another school never restores Alpha State’s delay');
+});
+test('#60 source copy says what is playing now, apart from the selected game’s dedicated feed; a restored delay names its source and date',async t=>{
+ const old=Date.now()-8*DAY_MS;
+ const unposted=()=>({ready:null,status:'unavailable',selectedGame:{id:'g2',opponent:'Virginia',url:null},stop(){},setEnabled(){},relabel(){},refresh(){}});
+ const h=harness(t,unposted,{storage:{'homecall.position.live.duke-leanstream':JSON.stringify({version:1,value:3,savedAt:old})}});
+ assert.match(h.$('source-current').textContent,/^Play starts Duke Sports Network live\. The selected game’s dedicated feed isn’t posted yet\./);
+ h.$('connect').click();await settle();
+ assert.match(h.$('notice').textContent,/^Restoring the 3\.0-second delay you last used for Duke Sports Network \(saved [A-Z][a-z]{2} \d{1,2}\)\./);
+ h.player.update({...PLAYING,delay:0,available:1,restoring:3});h.player.update({...PLAYING,delay:3});
+ assert.match(h.$('notice').textContent,/^Using the 3\.0-second delay you last used for Duke Sports Network \(saved .+\)\. It’s a saved setting, not a TV match; check alignment\.$/);
+ assert.match(h.$('source-current').textContent,/^Playing Duke Sports Network live\. The selected game’s dedicated feed isn’t posted yet\. The network may carry other programming\.$/);
+ assert.doesNotMatch(h.$('home-mismatch').textContent+h.$('source-current').textContent,/Game audio isn’t available|Play starts/);
+ h.player.update({...PLAYING,delay:3,paused:true});assert.match(h.$('source-current').textContent,/^Paused on Duke Sports Network live\./);
+});
+test('#61 main Back 5 s and Forward 5 s use the existing nudge signs and kept-audio limits',async t=>{
+ const h=harness(t);assert.equal(h.$('skip-row').hidden,true,'nothing to move before Play');
+ h.$('connect').click();await settle();h.player.update(PLAYING);assert.equal(h.$('skip-row').hidden,false);
+ h.$('skip-back').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'nudge',value:5});
+ h.$('skip-forward').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'nudge',value:-5});
+ h.player.update({...PLAYING,delay:0});assert.deepEqual([h.$('skip-back').disabled,h.$('skip-forward').disabled],[false,true],'no forward past incoming audio');
+ h.player.update({...PLAYING,delay:90,available:90});assert.deepEqual([h.$('skip-back').disabled,h.$('skip-forward').disabled],[true,false],'no back past kept audio');
+ h.player.update({...PLAYING,holding:true});assert.deepEqual([h.$('skip-back').disabled,h.$('skip-forward').disabled],[true,true],'a hold owns timing');
+});
+test('#62 ordinary Pause and Hold here stay distinct; Mark aligned logs a check and never adjusts or saves the delay',async t=>{
+ const h=harness(t);h.$('connect').click();await settle();h.player.update(PLAYING);
+ assert.equal(h.$('hold').textContent,'Hold here');assert.equal(h.$('sync-help').textContent,'');assert.equal(h.$('confirm').textContent,'Mark aligned');
+ assert.match(h.$('confirm-help').textContent,/doesn’t change the audio/);
+ const saved=h.w.localStorage.getItem('homecall.position.live.duke-leanstream');
+ h.$('confirm').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'snapshot',value:undefined});
+ assert.equal(h.w.localStorage.getItem('homecall.position.live.duke-leanstream'),saved);
+ h.$('pause').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'pause',value:true},'main Pause is an ordinary pause');
+ h.player.update(PLAYING);h.$('hold').click();await settle();assert.deepEqual(h.player.lastCommand,{type:'hold',value:undefined});
+});
+test('#64 routine log retention stays in Session logs; real storage failures stay global',async t=>{
+ const seed={};for(let i=0;i<10;i++)seed[`mystream.session.s${i}`]=JSON.stringify({schemaVersion:1,id:`s${i}`,startedAt:new Date(Date.now()-(i+1)*DAY_MS).toISOString(),events:[]});
+ const h=harness(t,undefined,{storage:seed});h.$('connect').click();await settle();
+ assert.equal(h.$('storage-warning').textContent,'','no retention banner on listening screens');
+ assert.match(h.$('log-notice').textContent,/^Older logs were removed; only the 10 most recent are kept/);
+ assert.ok(h.$('log-notice').closest('#logs-dialog'));assert.match(h.$('log-retention').textContent,/10 most recent logs/);
+});
+// ---------- v1 corrections: rows follow the actual playing source (F1) ----------
+const DUKE_ID='2903e5f6-960e-4954-a3ec-f7754e78660f';
+const dualCatalog=()=>callbacks=>({ready:GAME,status:'ready',selectedGame:GAME,chosen:[],callbacks,choose(id){this.chosen.push(id);},stop(){},setEnabled(){},relabel(){},refresh(){}});
+const dukeGames={readJSON:async url=>{if(url.pathname.endsWith(`/homestream/games/${DUKE_ID}`))return [GAME];throw Error('none');}};
+const rowButton=(h,list,title)=>[...h.$(list).querySelectorAll('.list-row')].find(r=>r.querySelector('strong').textContent===title)?.querySelector('button');
+test('F1 the network playing beside a posted selected game is not that game: the game row offers the feed, Cancel keeps the network, Continue plays the feed',async t=>{
+ const h=harness(t,dualCatalog(),dukeGames);
+ h.$('feed').value='duke-leanstream';h.$('feed').onchange();h.$('connect').click();await settle();h.player.update(PLAYING);
+ assert.equal(tail(h.player.starts[0].url),'duke-leanstream');
+ openTeam(h,'duke');await flush();
+ assert.equal(rowButton(h,'team-games','vs Tulane').textContent,'Listen','the selected game is not playing; its feed is offered');
+ assert.equal(rowButton(h,'team-live','Duke Sports Network').textContent,'Open player','the named network is what plays');
+ route(h,'schedule');await flush();assert.equal(rowButton(h,'schedule-list','Duke vs Tulane').textContent,'Listen');
+ rowButton(h,'schedule-list','Duke vs Tulane').click();assert.equal(h.prompt(),true,'replacing the network asks first');
+ h.dismiss();assert.deepEqual([h.$('feed').value,h.player.starts.length,!!h.player.audio,h.catalog.chosen.length],['duke-leanstream',1,true,0],'Cancel changes no mode, game or audio');
+ rowButton(h,'schedule-list','Duke vs Tulane').click();h.proceed();
+ assert.equal(h.player.starts.length,2);assert.equal(h.player.starts[1].url,GAME.url,'the dedicated feed starts inside the click');
+ assert.equal(h.$('feed').value,'auto','the confirmed feed plays through Automatic, keeping its backup chain');
+});
+test('F1 reciprocal: while the dedicated feed plays, the network row is not current and selects the network it names',async t=>{
+ const h=harness(t,dualCatalog(),dukeGames);h.$('connect').click();await settle();h.player.update(PLAYING);
+ assert.equal(h.player.starts[0].url,GAME.url);
+ openTeam(h,'duke');await flush();
+ assert.equal(rowButton(h,'team-games','vs Tulane').textContent,'Open player');
+ assert.equal(rowButton(h,'team-live','Duke Sports Network').textContent,'Listen');
+ rowButton(h,'team-live','Duke Sports Network').click();assert.equal(h.prompt(),true);
+ h.dismiss();assert.deepEqual([h.$('feed').value,h.player.starts.length,!!h.player.audio],['auto',1,true]);
+ rowButton(h,'team-live','Duke Sports Network').click();h.proceed();
+ assert.equal(tail(h.player.starts[1].url),'duke-leanstream');assert.equal(h.$('feed').value,'duke-leanstream');
+});
+test('F1 an idle network row plays the named network, while the team’s generic Home Listen keeps Automatic’s feed-first order',async t=>{
+ let h=harness(t,dualCatalog(),dukeGames);openTeam(h,'duke');await flush();
+ rowButton(h,'team-live','Duke Sports Network').click();assert.equal(h.prompt(),false);
+ assert.equal(tail(h.player.starts[0].url),'duke-leanstream','not Automatic’s ready game feed');
+ h=harness(t,dualCatalog(),dukeGames);openTeam(h,'duke');h.$('team-star').click();route(h,'home');h.$('home-play').click();
+ assert.equal(h.player.starts[0].url,GAME.url);assert.equal(h.$('feed').value,'auto');
 });

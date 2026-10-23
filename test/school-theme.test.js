@@ -183,3 +183,11 @@ test('applying a theme sets every role; any unknown key clears every role and th
   assert.deepEqual(read(), { school: 'miami', ...schoolThemes.miami }, 'repeating a school is stable');
   assert.equal(el.getAttribute('style').split(';').filter(Boolean).length, Object.keys(THEME_ROLES).length, 'only the role tokens are written');
 });
+test('the Home hero uses the brand fill roles with on-fill text, never the lighter ink or an overlay (issue #67)', () => {
+  const hero = [...css.matchAll(/^\.home-hero \{([^}]*)\}/gm)].at(-1)[1];
+  assert.match(hero, /var\(--accent-fill\)/); assert.match(hero, /var\(--accent-fill-hover\)/); assert.match(hero, /color: var\(--on-accent\)/);
+  assert.doesNotMatch(hero, /accent-ink|#0005|repeating-linear-gradient/);
+  assert.deepEqual([schoolThemes.duke.fill, schoolThemes.duke.fillHover], ['#00539b', '#012169'], 'Duke Royal to Navy');
+  for (const [key, theme] of [...Object.entries(schoolThemes), ['fallback', fallbackTheme]])
+    for (const fill of [theme.fill, theme.fillHover]) assert.ok(contrastRatio(fill, theme.onFill) >= 4.5, `${key} ${fill}`);
+});

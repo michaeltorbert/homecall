@@ -1,4 +1,5 @@
 import { metadataURL, mediaURL } from '../src/gateway.js';
+import { validateGames } from '../src/homestream.js';
 import { defaultGame } from '../src/game-choice.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
 // Timers are recorded, never real: the initial status deadline fires only when a test fires it.
 function harness(t,{read,probe,gateway='https://gateway.example',hooks={}}={}){
  const dom=new JSDOM('<section id="game-panel"><select id="game"></select><p id="game-note"></p><button id="game-refresh"></button></section>',{url:'https://example.test/homecall/',runScripts:'outside-only'});t.after(()=>dom.window.close());
- const w=dom.window,timers=[];w.AbortController=AbortController;w.metadataURL=metadataURL;w.mediaURL=mediaURL;w.defaultGame=defaultGame;w.__GATEWAY_ORIGIN__=gateway;w.readJSON=read;w.checkPlaylist=probe;
+ const w=dom.window,timers=[];w.AbortController=AbortController;w.metadataURL=metadataURL;w.mediaURL=mediaURL;w.defaultGame=defaultGame;w.__GATEWAY_ORIGIN__=gateway;w.readJSON=read;w.checkPlaylist=probe;w.validateGames=validateGames;
  w.setTimeout=(fn,ms)=>{const timer={fn,ms,cancelled:false};timers.push(timer);return timer;};w.clearTimeout=timer=>{if(timer)timer.cancelled=true;};
  w.eval(source+';window.setup=setupHomestream;');
  let stopped=0,rendered=0;const ui=w.setup({onChange:()=>{stopped++},onReady:()=>{rendered++},...hooks});
@@ -187,7 +188,7 @@ test('the default waits for one status round with a neutral, enabled Game and a 
  assert.deepEqual(h.view(),{value:'',game:false,refresh:true,status:'loading',note:'Finding the live or next Sample game…',probes:[],stopped:1,rendered:0,ready:null});
  assert.equal(h.calls.length,1);assert.equal(h.deadline().length,1,'one 4-second deadline');
  h.calls[0].resolve(S({past:'completed',live:'live',next:'upcoming',later:'upcoming'}));await tick();
- assert.deepEqual(h.view(),{value:'live',game:false,refresh:false,status:'ready',note:'Live playlist confirmed. Press Play, then match the audio to your TV.',probes:['live'],stopped:1,rendered:1,ready:'live'});
+ assert.deepEqual(h.view(),{value:'live',game:false,refresh:false,status:'ready',note:'Live playlist confirmed: this game feed is advancing.',probes:['live'],stopped:1,rendered:1,ready:'live'});
  assert.deepEqual(h.values(),['past','live','next','later'],'the placeholder is gone; every game stays selectable');
  assert.equal(h.deadline().length,0,'the deadline is cleared');
 });
@@ -204,7 +205,7 @@ test('the 4-second deadline settles an abort-insensitive status hook; the late r
 test('a manual game choice during the wait retires the default and only that choice is probed',async t=>{
  const h=chooser(t);h.ui.setEnabled(true);await tick();
  h.$('game').value='past';await h.$('game').onchange();
- assert.deepEqual(h.view(),{value:'past',game:false,refresh:false,status:'ready',note:'Live playlist confirmed. Press Play, then match the audio to your TV.',probes:['past'],stopped:2,rendered:1,ready:'past'});
+ assert.deepEqual(h.view(),{value:'past',game:false,refresh:false,status:'ready',note:'Live playlist confirmed: this game feed is advancing.',probes:['past'],stopped:2,rendered:1,ready:'past'});
  assert.equal(h.calls[0].signal.aborted,true,'the wait is canceled');assert.equal(h.deadline().length,0);
  assert.deepEqual(h.values(),['past','live','next','later']);
  const before=h.view();h.calls[0].resolve(S({live:'live'}));await tick();
@@ -265,4 +266,30 @@ test('cross-origin and mismatched game media never reach the probe or Play readi
   const h=harness(t,{read:async path=>path.pathname.endsWith('/teams')?[{id:'team-id',name:'Georgia Tech'}]:[{...games[0],url}],probe:async()=>{probes++;return 'ready';}});
   h.ui.setEnabled(true);await tick();assert.equal(probes,0);assert.equal(h.ui.ready,null);assert.match(h.$('game-note').textContent,/could not load/);
  }
+});
+// ---------- Explicit game requests from Team or Schedule (issue #68): one load, revalidated, never stale ----------
+test('a requested game replaces the default for that load only, is probed, and needs no status wait',async t=>{
+ const h=chooser(t);h.ui.setEnabled(true,{game:'later'});await tick();
+ assert.equal(h.calls.length,0,'no default status round for an explicit request');
+ assert.deepEqual([h.$('game').value,h.ui.ready?.id,h.probes],['later','later',['later']]);
+ h.ui.refresh();await tick();assert.equal(h.$('game').value,'later','an ordinary refresh keeps the committed choice');
+});
+test('a requested game the fresh list no longer contains is never guessed or replaced by the default',async t=>{
+ const h=chooser(t);h.ui.setEnabled(true,{game:'withdrawn'});await tick();
+ assert.deepEqual([h.$('game').value,h.ui.ready,h.probes,h.calls.length],['',null,[],0]);
+ assert.equal(h.$('game-note').textContent,'The game you chose is no longer listed. Choose a listed game.');
+});
+test('a superseded request cannot commit: switching school before the list answers discards it',async t=>{
+ const h=chooser(t,{lists:{'team-a':slate('team-a'),'team-b':slate('team-b')}});
+ h.ui.setEnabled(true,{game:'later'});h.setTeam('team-b');h.ui.setEnabled(true);await tick();
+ assert.equal(h.calls.length,1,'only the replacement school runs its default round');
+ h.calls[0].resolve(S({past:'completed',live:'live',next:'upcoming',later:'upcoming'}));await tick();
+ assert.deepEqual([h.$('game').value,h.probes],['live',['live']],'the earlier request for another school never lands or probes');
+});
+test('choose() commits a listed game now, or reloads and commits only if the fresh list has it',async t=>{
+ const h=chooser(t);h.ui.setEnabled(true);await tick();h.calls[0].resolve(S({live:'live'}));await tick();
+ h.ui.choose('later');await tick();assert.deepEqual([h.$('game').value,h.ui.ready?.id],['later','later']);
+ h.lists['team-a']=[...slate('team-a'),{id:'added',start:T0+2*DAY,url:media('team-a','added'),opponent:'Navy'}];
+ h.ui.choose('added');await tick();assert.deepEqual([h.$('game').value,h.ui.ready?.id],['added','added'],'an unlisted request reloads first');
+ h.ui.choose('nowhere');await tick();assert.equal(h.$('game').value,'','a request missing from the fresh list commits nothing');
 });

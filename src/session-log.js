@@ -17,6 +17,8 @@ const cleanState = (state) => {
   for (const key of ['paused', 'holding', 'ingesting']) if (typeof state?.[key] === 'boolean') value[key] = state[key];
   return value;
 };
+// onWarning(text, kind): kind 'storage' is a real persistence failure that needs attention anywhere;
+// 'retention' and 'log-limit' are routine log-management guidance for the Session logs view only.
 export class SessionLog {
   constructor({ storage, now = () => performance.now(), utc = () => new Date().toISOString(), id = () => crypto.randomUUID(), maxEvents = 2000, maxSessions = 10, build = 'development', onWarning = () => {} } = {}) {
     this.storage = storage; this.now = now; this.utc = utc; this.id = id;
@@ -51,7 +53,7 @@ export class SessionLog {
     this.session.events.push(event);
     if (this.session.events.length > this.maxEvents) {
       this.session.events.shift(); this.session.truncatedEvents++;
-      if (this.session.truncatedEvents === 1) this.onWarning('This log reached its limit. The oldest events are being removed; the export records this.');
+      if (this.session.truncatedEvents === 1) this.onWarning('This log reached its limit. The oldest events are being removed; the export records this.', 'log-limit');
     }
     this.save();
   }
@@ -108,13 +110,13 @@ export class SessionLog {
       const records = this.list();
       for (const old of records.slice(this.maxSessions)) { this.storage.removeItem(PREFIX + old.id); this.memory.delete(old.id); }
       if (records.length > this.maxSessions && !this.retentionWarned) {
-        this.retentionWarned = true; this.onWarning(`Only the ${this.maxSessions} most recent logs are kept. Export any you want to save.`);
+        this.retentionWarned = true; this.onWarning(`Older logs were removed; only the ${this.maxSessions} most recent are kept. Export any you want to save.`, 'retention');
       }
     } catch { this.warnMemory(); }
     while (this.memory.size > this.maxSessions) this.memory.delete(this.memory.keys().next().value);
   }
   warnMemory() {
-    if (!this.memoryOnly) { this.memoryOnly = true; this.onWarning('Log storage is unavailable. Keep this page open and share or download the log before leaving.'); }
+    if (!this.memoryOnly) { this.memoryOnly = true; this.onWarning('Log storage is unavailable. Keep this page open and share or download the log before leaving.', 'storage'); }
   }
   list() {
     const records = new Map(this.memory);
