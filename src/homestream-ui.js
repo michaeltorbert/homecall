@@ -2,12 +2,12 @@ import { metadataURL, mediaURL } from './gateway.js';
 import { readJSON, checkPlaylist } from './homestream.js';
 import { defaultGame } from './game-choice.js';
 const messages = {
-  unpublished: 'This game’s feed has not been published. Refresh closer to the broadcast.',
+  unpublished: '',
   missing: 'The published feed is unavailable (404). It may not have started or may have ended.',
   ended: 'This feed has ended. Select another game or refresh the list.',
   stalled: 'The playlist is not advancing. Refresh to check again.',
   unavailable: 'The feed could not be checked. Refresh to retry or use the official listening site.',
-  catalog: 'The game catalog could not load. Refresh to retry. This host needs the Homecall catalog service.',
+  catalog: 'The game catalog could not load. Refresh to retry.',
   ready: 'Live playlist confirmed. Press Play, then match the audio to your TV.'
 };
 // Why the Game choice is left neutral. Absence is claimed only when every listed game is freshly Completed.
@@ -34,7 +34,7 @@ function kickoffText(g, kickoff) {
   // The warning leads the time so a narrow closed select can never truncate it away.
   return kickoff === 'confirmed' ? time : `Unconfirmed time: ${time}`;
 }
-const gameLabel = (g, kickoff) => `${kickoffText(g, kickoff)} · vs ${g.opponent}${g.url ? '' : ' · feed not published'}`;
+const gameLabel = (g, kickoff, reported) => `${kickoffText(g, kickoff)} · vs ${g.opponent}${g.url || g.start > Date.now() && reported !== 'LIVE' ? '' : ' · feed not published'}`;
 // The default game waits at most this long for the first status round.
 const INITIAL_WAIT_MS = 4000;
 // onGames/onCatalogInvalidated are optional label hooks; they never affect readiness or playback.
@@ -120,7 +120,7 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
     const result = game?.url ? await probe(game.url, { signal }) : 'unpublished';
     if (signal.aborted) return;
     ready = result === 'ready' ? game : null; status = ready ? 'ready' : 'unavailable';
-    note(messages[result] || messages.unavailable);
+    note(messages[result] ?? messages.unavailable);
     onReady();
   }
   // initial: a team was enabled, so a default may be chosen. An explicit refresh only keeps a choice.
@@ -213,6 +213,7 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
   $('game-refresh').onclick = () => guard('refresh', refresh);
   return {
     get ready() { return ready; },
+    get selectedGame() { return enabled ? games.find(game => game.id === committed) ?? null : null; },
     get status() { return status; },
     refresh,
     setEnabled(value) { enabled = value; cancel(); invalidate(); status = 'idle'; $('game-panel').hidden = !value; if (value) load(true); },
@@ -223,8 +224,8 @@ export function setupHomestream({ onChange, onReady, onGames, onCatalogInvalidat
       for (const option of $('game').options) {
         const game = optionGames.get(option);
         if (game === undefined) continue;
-        const base = gameLabel(game, kickoffs.get(option.value));
         const prefix = labels.get(option.value);
+        const base = gameLabel(game, kickoffs.get(option.value), prefix);
         const text = prefix ? `${prefix} · ${base}` : base;
         if (option.textContent !== text) option.textContent = text;
       }

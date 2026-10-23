@@ -3,7 +3,7 @@
 // broadcaster schedule contract make requests; every other school stays hidden and silent.
 export const SCHEDULE_PATHS = Object.freeze({ duke: 'broadcast/schedule/duke' });
 // The schedule describes the school's network, not an affiliate that may be selected in Source.
-const NETWORK = Object.freeze({ duke: 'Duke network' });
+const NETWORK = Object.freeze({ duke: 'Duke Sports Network' });
 // Local policy, not provider guarantees: poll once a minute while visible, and treat data older than
 // five minutes (source age + request + elapsed) as unknown.
 export const POLL_MS = 60000, MAX_AGE_MS = 300000, CLOCK_JUMP_MS = 2000;
@@ -20,24 +20,21 @@ export function validateSchedule(data, school) {
   return { state: 'upcoming', event: { id: event.id, label: event.label, kind: event.kind, broadcastStart: event.broadcastStart }, ageMs: data.ageMs };
 }
 export function formatRemaining(ms) {
-  const total = Math.max(1, Math.ceil(ms / 1000));
-  const days = Math.floor(total / 86400), hours = Math.floor(total % 86400 / 3600), minutes = Math.floor(total % 3600 / 60), seconds = total % 60;
-  if (days) return `${days} d ${hours} h`;
-  if (hours) return `${hours} h ${String(minutes).padStart(2, '0')} min`;
-  if (minutes) return `${minutes} min ${String(seconds).padStart(2, '0')} s`;
-  return `${seconds} s`;
+  if (ms < 60000) return 'less than 1 min';
+  const minutes = Math.ceil(ms / 60000), hours = Math.floor(minutes / 60);
+  return hours ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
 }
 const localTime = ms => new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 // Reaching the scheduled start is stated neutrally: it confirms neither audio nor a live game.
 export function scheduleText(school, snapshot, nowMs, formatTime = localTime) {
   const network = NETWORK[school];
   if (!network) return '';
-  if (!snapshot) return `${network} · Checking the broadcast schedule…`;
-  if (snapshot.state === 'none-listed') return `${network} · No upcoming broadcast listed.`;
-  if (snapshot.state !== 'upcoming') return snapshot.reason === 'uncertain' ? `${network} · Next broadcast time not confirmed.` : `${network} · Next broadcast time unknown.`;
+  if (!snapshot) return `Next on ${network} · Checking the broadcast schedule…`;
+  if (snapshot.state === 'none-listed') return `Next on ${network} · No upcoming broadcast listed.`;
+  if (snapshot.state !== 'upcoming') return snapshot.reason === 'uncertain' ? `Next on ${network} · Next broadcast time not confirmed.` : `Next on ${network} · Next broadcast time unknown.`;
   const { event } = snapshot, remaining = event.broadcastStart - nowMs;
-  if (remaining <= 0) return `${network} · Scheduled broadcast start time reached for ${event.label}. This does not confirm audio or game status.`;
-  return `${network} · Next broadcast starts in ${formatRemaining(remaining)} (${formatTime(event.broadcastStart)}) · ${event.label}`;
+  if (remaining <= 0) return `Next on ${network} · Scheduled broadcast start time reached for ${event.label}. This does not confirm audio or game status.`;
+  return `Next on ${network} · Next broadcast starts in ${formatRemaining(remaining)} (${formatTime(event.broadcastStart)}) · ${event.label}`;
 }
 
 export function createBroadcastCountdown({ read, el, now = Date.now, mono = () => performance.now(), enabled = () => true,

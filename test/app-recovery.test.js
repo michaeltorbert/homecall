@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { setupViews } from '../src/app-views.js';
 import { PlaybackMemory } from '../src/playback-memory.js';
 import { SessionLog } from '../src/session-log.js';
 import { teams, getSources } from '../src/teams.js';
@@ -54,7 +55,7 @@ function harness(t, catalogFactory, {storage:seed={},...extra}={}) {
  // Records the committed-school and lifecycle calls; tests may inject the real controller through extra.
  const fakeCountdown={schools:[],suspends:0,resumes:0,ticks:0,setSchool(key){this.schools.push(key);},suspend(){this.suspends++;},resume(){this.resumes++;},tick(){this.ticks++;},stop(){}};
  Object.assign(w,{setupGameTiming:options=>{fakeTiming.options=options;return fakeTiming;},setupHomestream:callbacks=>(catalog=catalogFactory ? catalogFactory(callbacks) : {ready:null,status:'unavailable',stop(){},setEnabled(){},relabel(){},refresh(){}}),
-  PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{},listenTeams,resolveSources,officialLink,createListenSession,failureKind,TIMELINE_NOTICE,FALLBACK_NOTICE,
+  setupViews,PlaybackMemory,SessionLog,teams,getSources,Player:FakePlayer,demoURL:()=> 'blob:demo',setupArchive:()=>{},listenTeams,resolveSources,officialLink,createListenSession,failureKind,TIMELINE_NOTICE,FALLBACK_NOTICE,
   createGameStatus:()=>({setGames(){},clear(){},suspend(){},resume(){},tick(){},stop(){}}),createBroadcastCountdown:options=>{fakeCountdown.options=options;return fakeCountdown;},
   createNowPlaying,nowPlayingArtwork,createScoreboard,metadataURL,configuredGatewayOrigin,gatewayOptions,readJSON:async()=>{throw Error('no metadata in recovery tests');},applySchoolTheme,...shell,...extra});
  w.localStorage.setItem('homecall.position.live.duke-leanstream',JSON.stringify({version:1,value:35,savedAt:Date.now()-20000}));
@@ -138,7 +139,7 @@ test('a stale playing snapshot cannot erase a native pause awaiting recovery',as
 // Superseded (CP3-7): a failed GT start no longer refreshes the catalog in the background.
 test('AC12 Georgia Tech: a failed game feed ends honestly with no invented network and no background catalog refresh',async t=>{
  const h=harness(t,gameCatalog());h.$('team').value='gt';h.$('team').onchange();
- assert.equal(h.$('feed-picker').hidden,true,'the game feed is the only source');
+ assert.equal(h.$('feed-picker').hidden,false,'Source mode remains visible even when only a game feed is configured');
  h.player.outcomes=[Error('offline')];h.$('connect').click();await flush();
  assert.equal(h.player.starts.length,1);assert.equal(h.catalog.refreshes,0);
  assert.equal(h.$('notice').textContent,'Audio could not play. Press Retry to start again, or open the official player.');
@@ -203,7 +204,7 @@ test('a failed lowest-ranked manual choice ends without suggesting tried sources
 test('backup controls and official links reset when changing teams',async t=>{
  const h=harness(t);assert.equal(h.$('feed-picker').hidden,false);assert.equal(h.$('feed').options.length,7);
  h.$('feed').value='duke-wccg';h.$('feed').onchange();
- h.$('team').value='miami';h.$('team').onchange();assert.equal(h.$('feed-picker').hidden,true);
+ h.$('team').value='miami';h.$('team').onchange();assert.equal(h.$('feed-picker').hidden,false);
  h.$('connect').click();await settle();assert.equal(h.player.starts.at(-1).url,teams.miami.url);
  assert.equal(h.$('official').href,teams.miami.official);
  h.$('team').value='duke';h.$('team').onchange();h.proceed();assert.equal(h.$('feed').value,'auto');
@@ -349,26 +350,26 @@ test('log removal refuses during playback without claiming success',async t=>{
 test('AC1 Duke with a ready game feed: Play starts it inside the click, Source shows it, overrides reach the network and backups',async t=>{
  const h=harness(t,gameCatalog());
  assert.deepEqual([...h.$('feed').options].map(o=>o.textContent),['Automatic','Game feed','Network','Network backup','WSJS backup','WCCG backup','WTIB backup']);
- assert.equal(h.$('feed').value,'auto');assert.equal(h.$('source-current').textContent,'Will play · Game feed · timestamps checked once it loads');
+ assert.equal(h.$('feed').value,'auto');assert.equal(h.$('source-current').textContent,'');
  assert.equal(h.$('station').textContent,'Duke vs Tulane');
  h.$('connect').click();assert.deepEqual(h.player.starts[0],{url:GAME.url,delay:0,mp3:false,hls:true});assert.deepEqual(h.timing.starts,['g1']);await settle();
  h.player.ts='available';h.player.update(PLAYING);
- assert.equal(h.$('source-current').textContent,'Playing · Game feed · broadcast timestamps');assert.equal(h.$('timing-tools').hidden,false,'timestamp tools are offered');
+ assert.equal(h.$('source-current').textContent,'');assert.equal(h.$('timing-tools').hidden,false,'timestamp tools are offered');
  h.$('feed').value='duke-leanstream';h.$('feed').onchange();h.proceed();assert.equal(h.$('timing-tools').hidden,true);
  h.$('connect').click();assert.deepEqual(h.player.starts.at(-1),{url:teams.duke.url,delay:0,mp3:true,hls:false},'an override starts at incoming audio');
  await settle();h.$('stop').click();h.$('feed').value='duke-wccg';h.$('feed').onchange();h.$('connect').click();assert.equal(tail(h.player.starts.at(-1).url),'duke-wccg');
 });
 test('AC2 a game feed unavailable before Play selects the network with manual alignment and no switch notice',async t=>{
  const h=harness(t,gameCatalog('unavailable'));
- assert.equal(h.$('source-current').textContent,'Will play · Network · manual alignment');
+ assert.equal(h.$('source-current').textContent,'');
  const game=h.$('feed').querySelector('option[value="duke-game"]');assert.equal(game.textContent,'Game feed · unavailable');assert.equal(game.disabled,true);
  h.$('connect').click();await settle();assert.equal(h.player.starts[0].url,teams.duke.url);h.player.update(PLAYING);h.player.event('output-ready');
- assert.equal(h.$('switch-notice').hidden,true);assert.equal(h.$('source-current').textContent,'Playing · Network · manual alignment');
+ assert.equal(h.$('switch-notice').hidden,true);assert.equal(h.$('source-current').textContent,'');
 });
 test('AC3 a playable feed without timestamps keeps the same audio and manual alignment, with its notice and no switch',async t=>{
  const h=harness(t,gameCatalog());h.$('connect').click();await settle();h.player.ts='missing';h.player.update({...PLAYING,delay:0});
  assert.equal(h.$('notice').textContent,TIMELINE_NOTICE.timestamps);assert.equal(h.player.starts.length,1);
- assert.equal(h.$('timing-tools').hidden,true);assert.equal(h.$('source-current').textContent,'Playing · Game feed · manual alignment · no broadcast timestamps');
+ assert.equal(h.$('timing-tools').hidden,true);assert.equal(h.$('source-current').textContent,'');
  h.player.event('output-ready');assert.equal(h.$('switch-notice').hidden,true);
  for(const b of h.w.document.querySelectorAll('[data-nudge]'))assert.equal(b.disabled,false);
  assert.equal(h.$('hold').disabled,false);assert.equal(h.$('live').disabled,false);
@@ -381,7 +382,7 @@ test('AC4 a startup transport failure on the game feed moves once to the network
  assert.equal(h.$('switch-notice').hidden,true,'no notice before output');assert.equal(h.timing.resets>0,true,'timestamp offset and calibration reset');
  h.player.update(PLAYING);assert.equal(h.$('switch-notice').hidden,true,'engine state alone is not output proof');
  h.player.event('output-ready');assert.equal(h.$('switch-notice').hidden,false);assert.match(h.$('switch-notice').textContent,/^Switched to Duke Sports Network\b.*check alignment with your TV/);
- assert.equal(h.$('station').textContent,'Duke Sports Network');assert.equal(h.$('source-current').textContent,'Playing · Network · manual alignment');
+ assert.equal(h.$('station').textContent,'Duke Sports Network');assert.equal(h.$('source-current').textContent,'');
  const log=h.log();assert.deepEqual([log.sourceId,log.trigger,log.previousSourceId],['duke-leanstream','fallback','duke-game']);
  h.player.event('output-ready');assert.equal(h.$('switch-notice').hidden,false);
 });
@@ -392,7 +393,7 @@ test('AC5 after same-source recovery is exhausted the next candidate plays at in
  h.player.event('source-reconnect-exhausted');h.player.update(null);
  assert.deepEqual(h.player.starts.at(-1),{url:'https://gateway.example/media/live/duke-varsity',delay:0,mp3:false,hls:false});assert.equal(h.$('switch-notice').hidden,true);
  await settle();h.player.update({...PLAYING,delay:0});h.player.event('output-ready');
- assert.match(h.$('switch-notice').textContent,/^Switched to Duke Sports Network · backup/);assert.equal(h.$('source-current').textContent,'Playing · Network backup · manual alignment');
+ assert.match(h.$('switch-notice').textContent,/^Switched to Duke Sports Network · backup/);assert.equal(h.$('source-current').textContent,'');
 });
 test('AC6/AC9 each candidate is entered once; exhaustion offers Retry and the official player without naming tried sources; Retry starts a new intent',async t=>{
  const h=harness(t,gameCatalog());h.player.outcomes=Array.from({length:6},()=>Error('offline'));
@@ -438,7 +439,7 @@ test('AC10 permission denial never advances: initial, retry and replacement wait
  let h=harness(t,gameCatalog());h.player.outcomes=[denied()];h.$('connect').click();await flush();
  assert.equal(h.player.starts.length,1);assert.equal(h.$('connect').disabled,false);assert.equal(h.$('switch-notice').hidden,true);
  assert.equal(h.$('notice').textContent,'This browser needs a tap to start audio. Press Play to start Duke · Game feed.');
- assert.equal(h.$('source-current').textContent,'Waiting for Play · Game feed · timestamps checked once it loads');
+ assert.equal(h.$('source-current').textContent,'');
  h.$('connect').click();assert.equal(h.player.starts[1].url,GAME.url);await settle();h.player.event('output-ready');assert.equal(h.$('switch-notice').hidden,true,'the initial source is not a switch');
  h=harness(t,gameCatalog());h.player.outcomes=[Error('offline'),denied()];h.$('connect').click();await flush();
  assert.equal(h.player.starts.length,2);assert.equal(h.$('switch-notice').hidden,true);
@@ -473,7 +474,7 @@ test('AC13/AC14 catalog-only schools join by explicit ID with no fallback or inv
  assert.deepEqual([...h.$('team').options].map(o=>o.value),['duke','miami','vt','gt','auburn','uva']);
  h.$('team').value='uva';h.$('team').onchange();
  assert.equal(h.$('connect').disabled,true);assert.equal(h.$('source-current').textContent,'No feed is available for this game right now.');
- assert.equal(h.$('feed-picker').hidden,true);assert.equal(h.$('official').hidden,true);
+ assert.equal(h.$('feed-picker').hidden,false);assert.equal(h.$('official').hidden,true);
  h.$('team').value='vt';h.$('team').onchange();h.$('connect').click();assert.equal(h.player.starts[0].url,teams.vt.url);
  h=harness(t,gameCatalog(),{readJSON:reader});await settle();h.$('team').value='uva';h.$('team').onchange();h.player.outcomes=[Error('offline')];h.$('connect').click();await flush();
  assert.equal(h.player.starts.length,1);assert.equal(h.$('notice').textContent,'Audio could not play. Press Retry to start again.');
@@ -537,7 +538,7 @@ test('AC17 an affiliate fallback keeps the coverage caution in the notice, the S
  const h=harness(t);h.$('feed').value='duke-varsity';h.$('feed').onchange();h.player.outcomes=[Error('offline')];h.$('connect').click();await flush();
  assert.equal(tail(h.player.starts.at(-1).url),'duke-wsjs');h.player.update({...PLAYING,delay:0});h.player.event('output-ready');
  assert.match(h.$('switch-notice').textContent,/Affiliate coverage can change; check that you hear the broadcast you want\.$/);
- assert.equal(h.$('source-current').textContent,'Playing · WSJS backup · affiliate · check coverage · manual alignment · chosen in Source');
+ assert.equal(h.$('source-current').textContent,'Affiliate station · coverage may change; check that you hear the broadcast you want. Manual source · chosen in Source');
  assert.match(h.$('source-note').textContent,/coverage can change/);
 });
 test('F1 a parked unconfirmed timestamp move keeps the same game feed for Play: no fallback, no switch notice',async t=>{
@@ -545,7 +546,7 @@ test('F1 a parked unconfirmed timestamp move keeps the same game feed for Play: 
  h.player.event('source-reconnect-required',{reason:'seek'});h.player.update(null);
  assert.equal(h.player.starts.length,1,'no other source is entered');assert.equal(h.$('switch-notice').hidden,true);
  assert.equal(h.$('notice').textContent,'The timestamp move could not be confirmed and audio did not resume. Press Play to reconnect to the same source, then check alignment.');
- assert.equal(h.$('source-current').textContent,'Waiting for Play · Game feed · timestamps checked once it loads');
+ assert.equal(h.$('source-current').textContent,'');
  h.$('connect').click();assert.equal(h.player.starts[1].url,GAME.url,'Play restarts the same candidate');
  await settle();h.player.event('output-ready');assert.equal(h.$('switch-notice').hidden,true);
 });
@@ -556,7 +557,7 @@ test('F2 eligible output retires obsolete buffering and trying text; a replaceme
  h.player.event('source-playing');h.player.update({...PLAYING,delay:0});assert.match(h.$('notice').textContent,/buffering/,'media playing alone is not output proof');
  h.player.event('output-ready');
  assert.equal(h.$('notice').textContent,'Switched from Duke · Game feed. Check alignment with your TV.');assert.equal(h.$('switch-notice').hidden,false);
- assert.equal(h.$('notice').dataset.alert,'','the reminder is quiet, not a warning');assert.equal(h.$('source-current').textContent,'Playing · Network · manual alignment');
+ assert.equal(h.$('notice').dataset.alert,'','the reminder is quiet, not a warning');assert.equal(h.$('source-current').textContent,'');
  h.player.event('source-waiting');h.player.event('source-playing');
  assert.equal(h.$('notice').textContent,'The source returned after buffering. Check alignment with your TV.','a mid-session resume keeps an alignment check, not a stale buffering claim');
  h=harness(t);h.$('connect').click();await settle();h.player.event('source-waiting');h.player.event('output-ready');
@@ -572,7 +573,7 @@ test('F2 output never retires independent warnings: restoration, interruption, m
  h=harness(t);h.$('feed').value='duke-varsity';h.$('feed').onchange();h.player.outcomes=[Error('offline')];h.$('connect').click();await flush();
  h.player.event('source-stalled');h.player.update({...PLAYING,delay:0});h.player.event('output-ready');
  assert.equal(h.$('notice').textContent,'Switched from Duke Sports Network · backup. Check alignment with your TV.');
- assert.match(h.$('switch-notice').textContent,/Affiliate coverage can change/);assert.match(h.$('source-current').textContent,/affiliate · check coverage/);
+ assert.match(h.$('switch-notice').textContent,/Affiliate coverage can change/);assert.match(h.$('source-current').textContent,/Affiliate station · coverage may change/);
 });
 test('catalog Incoming audio moves media only when the input is far behind; timeline restore outcomes are honest notices',async t=>{
  const h=harness(t,gameCatalog());h.$('connect').click();await settle();h.player.update({...PLAYING,delay:0});
@@ -612,7 +613,7 @@ test('countdown ticks, polls, zero crossing and errors never change playback, de
  const schedule=start=>({schemaVersion:1,school:'duke',state:'upcoming',event:{id:'e1',label:'Football: Visitor',kind:'game',broadcastStart:start},checkedAt:wall,ageMs:0});
  answers.push(schedule(wall+3000));
  const h=harness(t,undefined,{createBroadcastCountdown:options=>(controller=createBroadcastCountdown({...options,read,now:()=>wall,mono:()=>mono,setTimer:()=>0,clearTimer(){},formatTime:()=>'soon'}))});
- await flush();assert.match(h.$('broadcast-next').textContent,/^Duke network · Next broadcast starts in 3 s/);assert.equal(h.$('broadcast-next').hidden,false);
+ await flush();assert.match(h.$('broadcast-next').textContent,/^Next on Duke Sports Network · Next broadcast starts in less than 1 min/);assert.equal(h.$('broadcast-next').hidden,false);
  h.$('connect').click();await settle();
  h.player.update({delay:35,available:40,paused:false,holding:false,ingesting:true,restoring:null});
  const snapshot=()=>({starts:h.player.starts.length,command:h.player.lastCommand,status:h.$('status').textContent,notice:h.$('notice').textContent,source:h.$('source-current').textContent,
@@ -622,7 +623,7 @@ test('countdown ticks, polls, zero crossing and errors never change playback, de
  for(let i=0;i<5;i++){wall+=1000;mono+=1000;controller.tick();await settle();}
  assert.match(h.$('broadcast-next').textContent,/start time reached for Football: Visitor\. This does not confirm audio or game status\./);
  controller.suspend();controller.resume();await flush();
- assert.equal(h.$('broadcast-next').textContent,'Duke network · Next broadcast time unknown.');
+ assert.equal(h.$('broadcast-next').textContent,'Next on Duke Sports Network · Next broadcast time unknown.');
  assert.deepEqual(reads,['broadcast/schedule/duke','broadcast/schedule/duke','broadcast/schedule/duke']);
  assert.deepEqual(snapshot(),before);assert.equal(h.$('status').textContent,'Playing');
  h.$('team').value='miami';h.$('team').onchange();h.proceed();assert.equal(h.$('broadcast-next').hidden,true);assert.equal(reads.length,3);

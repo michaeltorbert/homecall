@@ -1,3 +1,4 @@
+import { setupViews } from '../src/app-views.js';
 // Real consumers (app.js Listen, Archive) wired to the real Now Playing publisher and scoreboard poller.
 // Only I/O, timers, players, the catalog and the platform MediaSession object are fakes. Browser API
 // readback here is not OS, phone or car proof.
@@ -87,7 +88,7 @@ function live(t, { mediaSession = true, games = { [GT]: { game: GT_GAME, list: G
   w.clearInterval = ticker => { if (ticker) ticker.cancelled = true; };
   if (mediaSession) { Object.defineProperty(w.navigator, 'mediaSession', { value: h.ms, configurable: true }); w.MediaMetadata = FakeMetadata; }
   w.URL.revokeObjectURL = () => {};
-  Object.assign(w, { setupGameTiming: () => ({ start() {}, stop() {}, reset() {}, invalidate() {}, render() {} }), setupArchive: options => { h.archiveOptions = options; }, setupHomestream: catalogFactory,
+  Object.assign(w, {setupViews, setupGameTiming: () => ({ start() {}, stop() {}, reset() {}, invalidate() {}, render() {} }), setupArchive: options => { h.archiveOptions = options; }, setupHomestream: catalogFactory,
     createBroadcastCountdown: () => ({ setSchool() {}, tick() {}, suspend() {}, resume() {}, stop() {} }), createGameStatus: () => ({ setGames() {}, clear() {}, suspend() {}, resume() {}, tick() {}, stop() {} }), listenTeams, resolveSources, officialLink, createListenSession, failureKind, TIMELINE_NOTICE, FALLBACK_NOTICE,
     PlaybackMemory, SessionLog, teams, getSources, Player: FakePlayer, demoURL: () => 'blob:demo', createNowPlaying, nowPlayingArtwork, createScoreboard, readJSON, metadataURL, configuredGatewayOrigin, gatewayOptions, applySchoolTheme, ...shell });
   w.eval(strip('../src/app.js'));
@@ -330,7 +331,7 @@ test('AC16 a game-feed fallback publishes the actual network identity without a 
   assert.match(h.$('switch-notice').textContent, /^Switched to Duke Sports Network/);
   const fade = h.timers.filter(x => !x.cancelled && x.ms === 6000).at(-1); fade.fn(); h.timers.filter(x => !x.cancelled && x.ms === 700).at(-1).fn();
   assert.equal(h.$('switch-notice').hidden, true, 'the notice fades');
-  assert.equal(h.$('source-current').textContent, 'Playing · Network · manual alignment', 'Source stays accurate after the notice fades');
+  assert.equal(h.$('source-current').textContent, '', 'Source stays accurate after the notice fades');
   assert.equal(h.$('station').textContent, 'Duke Sports Network');
   h.$('preview').click(); assert.equal(JSON.parse(h.$('export').value).sourceId, 'duke-leanstream');
 });

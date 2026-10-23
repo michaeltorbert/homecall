@@ -1,3 +1,4 @@
+import { setupViews } from './app-views.js';
 import { setupGameTiming } from './sync.js';
 import { PlaybackMemory } from './playback-memory.js';
 import { setupArchive } from './archive.js';
@@ -31,7 +32,7 @@ try { const saved = storage?.getItem('mystream.team'); if (configured.has(saved)
 let resetSourceDelay = false;
 let state = null, connecting = false, active = false, scrubbing = false, generation = 0, demo = null, pending = 0, specialPending = false;
 let previewText = '', previewId = '', needsCheck = true, sourceStatus = 'Stopped', attention = false;
-let nav = null;
+let nav = null, views = null;
 // One Listen owner: the Source mode and listening intent, the candidate physically started, its attempt
 // token, and the terminal Player event that explains an ended physical session.
 const session = createListenSession();
@@ -42,6 +43,7 @@ let progressText = null, outputSeen = false, switchedFrom = null;
 const build = typeof __APP_BUILD__ === 'string' ? __APP_BUILD__ : 'development';
 $('build').textContent = build;
 const log = new SessionLog({ storage, build, onWarning: text => { $('storage-warning').textContent = text; } });
+let historyRecords = [];
 const notice = text => { $('notice').textContent = text; };
 const progress = text => { notice(text); progressText = text; };
 const progressShown = () => progressText !== null && $('notice').textContent === progressText;
@@ -186,14 +188,20 @@ function sourceLine(r, status) {
   const c = shown();
   if (!c) return r.state === 'checking' ? 'Checking the game feed before Play…' : r.state === 'unavailable' ? 'No feed is available for this game right now.' : session.mode !== 'auto' ? 'The chosen source is not available. Choose Automatic or another source.' : '';
   if (c.demo) return '';
-  const prefix = connecting ? 'Connecting' : active ? (status.startsWith('Playing') ? 'Playing' : 'Source') : session.pending === 'paused' ? 'Paused on' : session.pending ? 'Waiting for Play' : 'Will play';
-  const ts = active && c.kind === 'game' ? player.timestampState?.() : null;
-  const alignment = c.kind !== 'game' ? 'manual alignment' : ts === 'available' ? 'broadcast timestamps' : ts === 'missing' ? 'manual alignment · no broadcast timestamps' : 'timestamps checked once it loads';
-  return [prefix, c.label, c.kind === 'affiliate' ? 'affiliate · check coverage' : null, alignment, session.mode !== 'auto' ? 'chosen in Source' : null].filter(Boolean).join(' · ');
+  const coverage = c.kind === 'affiliate' ? `Affiliate station · coverage may change; check that you hear the broadcast you want.${session.mode !== 'auto' ? ' Manual source · chosen in Source' : ''}` : '';
+  const game = catalog.selectedGame;
+  if (c.kind !== 'game' && game) {
+    const reason = catalog.ready?.id === game.id ? session.mode !== 'auto' ? 'Manual source instead of the selected game feed.' : 'The game feed was replaced by this source.' : 'Game audio isn’t available.';
+    return `${reason} Play starts ${c.station} live; it may carry another program.${coverage ? ` ${coverage}` : ''}`;
+  }
+  if (coverage) return coverage;
+  return session.mode !== 'auto' ? 'Manual source · chosen in Source' : '';
+
 }
 function render() {
   const r = resolution(), team = currentTeam();
   const ready = active && !!state && !connecting;
+  $('game-refresh').hidden = !team.catalogId;
   const restoring = state?.restoring != null;
   const holding = !!state?.holding;
   const positionReady = ready && !restoring && player.context?.state === 'running';
@@ -202,7 +210,7 @@ function render() {
   const status = primaryStatus();
   $('status').textContent = status;
   const playable = !!session.pending || (r.state === 'resolved' && !!nextCandidate(r));
-  $('connect').textContent = active ? 'Reconnect' : 'Play';
+  $('connect').textContent = active ? 'Reconnect' : shown()?.kind === 'game' ? 'Play game' : shown() ? 'Play stream' : 'Play';
   $('connect').hidden = active;
   // Play waits for the pre-Play check; it never starts a placeholder for a feed still being checked.
   $('connect').disabled = connecting || (!active && !playable);
@@ -270,6 +278,7 @@ function render() {
   $('owner-state').textContent = $('status').textContent;
   $('owner-stop').disabled = !active && !connecting;
   liveBoard.check();
+  views?.update();
 }
 function showSource() {
   const team = currentTeam(), r = resolution(), source = shown();
@@ -288,7 +297,7 @@ function rebuildSources() {
   if (r.gameSourceId) options.push([r.gameSourceId, 'Game feed', 'The selected game’s published broadcast feed']);
   for (const c of team.radio ? resolveSources({ ...team, catalogId: null }).candidates : []) options.push([c.sourceId, c.label, c.description]);
   $('feed').replaceChildren(...options.map(([value, text, title]) => { const option = document.createElement('option'); option.value = value; option.textContent = text; option.title = title; return option; }));
-  $('feed').value = session.mode; $('feed-picker').hidden = options.length < 3;
+  $('feed').value = session.mode; $('feed-picker').hidden = false;
 }
 function teamChanged() {
   disconnect(); selected = $('team').value;
@@ -431,6 +440,7 @@ function outputReady() {
   if (!attempt) return;
   outputSeen = true;
   log.add('output-ready', {}, state);
+  refreshSessions(log.session?.id);
   const replaced = session.outputReady(attempt);
   // Eligible output makes buffering or "trying" text obsolete. A replacement keeps a quiet alignment
   // reminder after its brief notice fades; other warnings stay as they are.
@@ -515,7 +525,7 @@ async function command(action, value) {
 function refreshSessions(preferred) {
   const selectedId = preferred || $('sessions').value;
   $('sessions').replaceChildren();
-  const records = log.list();
+  const records = historyRecords = log.list();
   for (const s of records) {
     const option = document.createElement('option'); option.value = s.id;
     option.textContent = `${teamList.get(s.team)?.name || (s.team === 'catalog' ? 'Catalog school' : 'Unknown')} · ${s.mode === 'demo' ? 'demo · ' : ''}${new Date(s.startedAt).toLocaleString()}`;
@@ -640,10 +650,30 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', () => { log.boundary('hidden', state); });
 setInterval(() => { if (active && state) log.heartbeat(state, !document.hidden && player.context?.state === 'running'); }, 30000);
 setInterval(() => { if (document.visibilityState !== 'hidden') { gameStatus.tick(); countdown.tick(); } }, 1000);
-setupShell({ doc: document, onMenuOpen: () => { $('menu-reconnect').disabled = !((active && !connecting) || session.pending); } });
+const shell = setupShell({ doc: document, onMenuOpen: () => { $('menu-reconnect').disabled = !((active && !connecting) || session.pending); } });
 teamChanged(); refreshSessions(); render();
 
 const liveActive = () => active || connecting;
 nav = setupArchive({ stopLive: disconnect, liveActive, confirm: ask, selectedTeam: () => selected, memory, nowPlaying,
-  onSchool: key => applySchoolTheme(document.documentElement, key) }) ?? null;
+  onSchool: key => applySchoolTheme(document.documentElement, key), onNavigate: mode => views?.commit(mode === 'archive' ? 'recordings' : 'player') }) ?? null;
+views = setupViews({ doc: document, shell,
+  navigate: (screen, commit) => nav ? nav.select(screen === 'recordings' ? 'archive' : 'live', { commit }) : commit(),
+  selectTeam: key => { $('team').value = key; $('team').onchange(); },
+  selectSource: id => { $('feed').value = id; $('feed').onchange(); }, play,
+  snapshot: () => {
+    const r = resolution(), team = currentTeam();
+    return { team, teams: [...teamList.values()], source: shown(), status: primaryStatus(), mode: $('feed').selectedOptions[0]?.textContent ?? 'Automatic',
+      art: nowPlayingArtwork(document.baseURI, { mode: 'live', school: team.name }, teams),
+      artFor: name => nowPlayingArtwork(document.baseURI, { mode: 'live', school: name }, teams),
+      gameMeta: catalog.selectedGame ? ($('game').selectedOptions[0]?.textContent ?? '').split(' · vs ')[0] : '',
+      gameTitle: catalog.selectedGame ? `${team.name} vs ${catalog.selectedGame.opponent}` : team.name,
+      gameLabel: team.catalogId ? $('game').selectedOptions[0]?.textContent ?? '' : '', mismatch: $('source-current').textContent,
+      sourceNote: r.state === 'checking' ? 'Checking the game feed before Play…' : r.state === 'unavailable' ? 'No source is available right now.' : 'Choosing a source does not start audio. Open Player and press Play.',
+      gameNote: team.catalogId ? $('game-note').textContent : '', schedule: $('broadcast-next').textContent, history: historyRecords,
+      playDisabled: $('connect').disabled, playLabel: $('connect').textContent, active, noCatalog: !team.catalogId,
+      refreshDisabled: $('game-refresh').disabled, reconnectDisabled: !((active && !connecting) || session.pending), official: officialLink(team, shown()),
+      games: [...(team.catalogId ? $('game').options : [])].filter(option => option.value).map(option => ({ id: option.value, label: option.textContent, selected: option.selected, disabled: $('game').disabled })),
+      sources: [...$('feed').options].filter(option => option.value !== 'auto').map(option => ({ id: option.value, label: r.candidates.find(c => c.sourceId === option.value)?.station ?? option.textContent, description: option.title, selected: option.selected, disabled: option.disabled })) };
+  }
+});
 loadTeams();

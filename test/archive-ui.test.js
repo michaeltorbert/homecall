@@ -167,7 +167,7 @@ test('zero-total, filtered-empty, stale-empty, stale, external, unavailable and 
   await settle();h.$('archive-tab').click();
   const reload=async()=>{h.$('archive-retry').click();await settle();};
   const notes={initial:'The archive catalog could not load. Try again or visit the official site.'};
-  notes.ready=h.note();assert.equal(notes.ready,`2 recordings · Catalog checked ${local(CHECKED)}. Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`);
+  notes.ready=h.note();assert.equal(notes.ready,`2 recordings · Catalog checked ${local(CHECKED)}.`);
   h.$('archive-sport').value='Football';h.$('archive-year').value='2025';h.$('archive-year').onchange();
   notes.filtered=h.note();assert.equal(notes.filtered,`No recordings match these filters. Try another sport or year. Catalog checked ${local(CHECKED)}.`);assert.equal(h.$('archive-list').children.length,0);
   h.school('vt');notes.staleEmpty=h.note();assert.equal(notes.staleEmpty,`The latest refresh failed. The last successful check found no recordings for Virginia Tech. Last checked ${local(CHECKED)}.`);
@@ -186,7 +186,7 @@ test('a stale school without its own time shows the time as unknown, never the n
   const newer='2026-09-11T06:00:00.000Z';
   const h=clocked(t,serve(docOf({duke:{status:'stale',source:'https://duke.leanplayer.com/',items:[item]},vt:{status:'ready',source:'https://hokiesports.com/',items:[{...item,id:'vt-one',url:'https://gateway.example/media/archive/vt/vt-one'}]}},newer)),Date.parse(newer)+H);await settle();h.$('archive-tab').click();
   assert.equal(h.note(),'Showing previously checked recordings. The latest refresh failed. Last successful check time unknown.');assert.ok(!h.note().includes(local(newer)));assert.equal(h.$('archive-list').children.length,1);
-  h.school('vt');assert.equal(h.note(),`1 recordings · Catalog checked ${local(newer)}. Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`);
+  h.school('vt');assert.equal(h.note(),`1 recordings · Catalog checked ${local(newer)}.`);
 });
 test('more than twelve hours old is conspicuous; aging updates only the note while visible and on return to the page',async t=>{
   const h=clocked(t,serve(docOf()),Date.parse(CHECKED)+12*H);await settle();h.$('archive-tab').click();
@@ -195,7 +195,7 @@ test('more than twelve hours old is conspicuous; aging updates only the note whi
   const before=h.counts(),src=h.audio.src,status=h.$('replay-status').textContent;
   assert.ok(!/12 hours/.test(h.note()),'exactly twelve hours is not yet overdue');
   h.visibility('hidden');h.clock.now+=1;h.tick();assert.ok(!/12 hours/.test(h.note()),'hidden pages are not updated by the timer');
-  h.visibility('visible');assert.match(h.note(),/^1 recordings · Catalog checked .*\. This list is more than 12 hours old; scheduled updates may have stopped\. Scores are omitted/);
+  h.visibility('visible');assert.match(h.note(),/^1 recordings · Catalog checked .*\. This list is more than 12 hours old; scheduled updates may have stopped\.$/);
   h.clock.now+=H;h.tick();assert.match(h.note(),/more than 12 hours old/);
   assert.equal(h.$('archive-list').firstElementChild,row);assert.equal(h.$('archive-sport').options[1],option);assert.equal(h.$('archive-sport').value,'Football');
   assert.deepEqual(h.counts(),before);assert.equal(h.audio.src,src);assert.equal(h.$('replay-status').textContent,status);
@@ -208,7 +208,7 @@ test('stale listings older than twelve hours carry the overdue warning',async t=
 });
 test('inclusive five-minute future skew counts as current; beyond it freshness is unknown',async t=>{
   const f=clocked(t,serve(docOf()),Date.parse(CHECKED)-5*M);await settle();f.$('archive-tab').click();assert.ok(!/freshness|12 hours/.test(f.note()));
-  f.clock.now-=1;f.tick();assert.match(f.note(),/Catalog checked .*\. Its freshness is unknown\. Scores/);assert.ok(f.note().includes(local(CHECKED)),'the timestamp itself is unchanged');
+  f.clock.now-=1;f.tick();assert.match(f.note(),/Catalog checked .*\. Its freshness is unknown\.$/);assert.ok(f.note().includes(local(CHECKED)),'the timestamp itself is unchanged');
 });
 test('a failed reload keeps the loaded list with a caveat across school and filter changes until a reload succeeds',async t=>{
   const h=clocked(t,serve(docOf(),Error('offline'),Error('offline'),docOf()));await settle();h.$('archive-tab').click();
@@ -320,4 +320,16 @@ test('recording errors are flagged for modal warning mirrors; routine status is 
  assert.equal(h.$('replay-status').dataset.alert,'');
  h.audio.dispatchEvent(new h.dom.window.Event('error'));assert.equal(h.$('replay-status').dataset.alert,'on');
  h.audio.dispatchEvent(new h.dom.window.Event('playing'));assert.equal(h.$('replay-status').dataset.alert,'');
+});
+test('already-live owner selection still returns the eight-screen presentation to Player without touching audio', async t=>{
+  const routes=[];const h=harness(t,undefined,undefined,undefined,{onNavigate:mode=>routes.push(mode)});await settle();
+  const before=h.counts();h.nav.select('live',{force:true});
+  assert.deepEqual(routes,['live']);assert.deepEqual(h.counts(),before,'test-tone navigation can reveal Player before its own synchronous start');
+});
+test('eight-screen departure callback waits for recording confirmation and keeps committed heading focus', async t=>{
+  const h=harness(t);await settle();h.nav.select('archive');h.$('archive-list').querySelector('button').click();
+  let commits=0;const target=h.$('teams-view').querySelector('h1');target.setAttribute('tabindex','-1');
+  const commit=()=>{commits++;h.$('teams-view').hidden=false;target.focus();};
+  h.nav.select('live',{commit});assert.equal(commits,0);h.dismiss();assert.equal(commits,0);assert.equal(h.audio.hasAttribute('src'),true);
+  h.nav.select('live',{commit});h.proceed();assert.equal(commits,1);assert.equal(h.audio.hasAttribute('src'),false);assert.equal(document.activeElement,target);
 });

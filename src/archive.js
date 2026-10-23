@@ -4,7 +4,7 @@ import { catalogFreshness, filterReplays, seekReplay, stopReplay, validateCatalo
 import { createConfirm } from './ui-shell.js';
 // onSchool receives the school whose appearance the visible view shows: the committed Recordings school,
 // or selectedTeam() on returning to Listen. It is appearance only and never sees a pending choice.
-export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null, liveActive = () => false, onSchool = () => {}, confirm = createConfirm(document), origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal, now = () => Date.now(), every = fn => document.defaultView?.setInterval(fn, 60_000) }) {
+export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null, liveActive = () => false, onSchool = () => {}, onNavigate = null, confirm = createConfirm(document), origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal, now = () => Date.now(), every = fn => document.defaultView?.setInterval(fn, 60_000) }) {
   const $ = id => document.getElementById(id);
   const audio = $('replay-audio');
   let replayKey = null, restorePosition = null, restoreAttempts = 0, playingStarted = false, failedRestoreAt = null, lastSaved = null;
@@ -36,13 +36,13 @@ export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null
   // Game broadcasts are aliases that open Listen at its team or game choice. Browsing never stops Listen
   // audio; leaving a loaded recording stops it, so that departure asks first.
   const tabs = ['listen', 'archive'], tabOf = name => (name === 'archive' ? 'archive' : 'listen');
-  function selectMode(next, { force = false, focus = null } = {}) {
+  function selectMode(next, { force = false, focus = null, commit = null } = {}) {
     if (next !== 'archive') next = 'live';
-    if (next === mode) { focusField(focus); return; }
+    if (next === mode) { focusField(focus); if (commit) commit(); else onNavigate?.(mode); return; }
     const leavingRecording = mode === 'archive' && !!current;
     if (!force && leavingRecording) {
       confirm.ask({ title: 'Stop this recording?', text: 'The recording stops when you leave it. Your position is saved.', action: 'Stop and leave' },
-        () => { selectMode(next, { force: true }); if (focus) focusField(focus); else $(`${tabOf(mode)}-tab`).focus(); });
+        () => { selectMode(next, { force: true, commit }); if (focus) focusField(focus); else if (!commit && !onNavigate) $(`${tabOf(mode)}-tab`).focus(); });
       return;
     }
     mode = next;
@@ -58,6 +58,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null
     if (mode === 'archive') { $('archive-team').value = [...$('archive-team').options].some(o => o.value === selectedTeam()) ? selectedTeam() : 'duke'; render(true); }
     else onSchool(selectedTeam());
     focusField(focus);
+    if (commit) commit(); else onNavigate?.(mode);
   }
   // Game broadcasts focuses the Listen game choice when one is shown, otherwise the team choice.
   function focusField(name) {
@@ -103,7 +104,7 @@ export function setupArchive({ stopLive, selectedTeam, memory, nowPlaying = null
     const at = source?.checkedAt || catalog.checkedAt, checked = `Catalog checked ${new Date(at).toLocaleString()}.${age(at)}`;
     if (!all.length) return `${caveat}No recordings are listed for ${team.name}. ${checked}`;
     if (!count) return `${caveat}No recordings match these filters. Try another sport or year. ${checked}`;
-    return `${caveat}${count} recordings · ${checked} Scores are omitted; broadcaster titles may contain spoilers. Recordings may include pregame and postgame audio.`;
+    return `${caveat}${count} recordings · ${checked}`;
   }
   // Only the note changes here, never the list, filters or audio.
   function renderNote() {
