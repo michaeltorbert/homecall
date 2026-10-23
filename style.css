@@ -531,7 +531,7 @@ header { min-height: 48px; margin-bottom: 28px; padding-bottom: 16px; border-bot
 .screen > h1 { font-size: 32px; font-weight: 480; letter-spacing: -1.2px; margin: 4px 0 3px; }
 .gameday-screen > h1 { font-weight: 800; }
 .screen-subtitle { color: #b8bcc8; margin-bottom: 18px; }
-.home-hero { padding: 20px; border-radius: 20px; background: repeating-linear-gradient(120deg, transparent 0 16px, #ffffff05 16px 28px), linear-gradient(130deg, var(--surface-hover), #07518c); }
+.home-hero { padding: 20px; border-radius: 20px; }
 .hero-identity { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .hero-identity img { width: 80px; height: 80px; border-radius: 18px; }
 .hero-identity h1 { font-size: 30px; font-weight: 850; line-height: 1.05; text-transform: uppercase; margin: 0; }
@@ -619,7 +619,12 @@ body[data-screen]:not([data-screen=player]) #live-panel { display: none; }
 @media (max-width: 430px) { .player-screen .selectors > .field { flex: 1 1 135px; } .player-screen .selectors #game-refresh { max-width: 48%; } }
 .nav-icon { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 #player-catalog-note:empty, #home-catalog-note:empty { display: none; }
-.home-hero { background: repeating-linear-gradient(120deg,transparent 0 16px,#ffffff05 16px 28px),linear-gradient(#0005,#0005),linear-gradient(130deg,var(--accent-ink),var(--surface-hover)); }
+/* Hero identity (issue #67): the school's published brand fill as an opaque plane, never the lighter
+   application ink or a darkening overlay. Duke is Royal #00539b to Navy #012169; light fills (Gold,
+   Orange, neutral) carry their curated dark on-fill text. */
+.home-hero { background: linear-gradient(135deg, var(--accent-fill) 0 55%, var(--accent-fill-hover)); color: var(--on-accent); }
+.hero-identity h1, .hero-identity .eyebrow { color: var(--on-accent); }
+.home-hero > .hero-player { background: #0a0f1a; color: var(--ink); }
 .player-screen { background: radial-gradient(ellipse at 50% 23%,var(--surface-hover),transparent 62%); }
 .main-nav button[aria-current=page] { color: var(--accent-ink); }
 .schedule-copy, #broadcast-next { display: flex; flex-direction: column; gap: 3px; }
@@ -640,3 +645,33 @@ body[data-screen]:not([data-screen=player]) #live-panel { display: none; }
 .hero-identity > div { flex: 1; min-width: 0; }
 .hero-identity img { flex-shrink: 0; }
 .hero-identity h1 { overflow-wrap: anywhere; }
+
+/* Favorite, Team page and weekly Schedule (issues #59, #66, #68). */
+.favorite-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 14px 0; }
+.favorite-list button { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; text-align: left; font-weight: 650; }
+.favorite-list img { width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; }
+.back-link { margin-bottom: 8px; }
+.team-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.team-head > img { width: 64px; height: 64px; border-radius: 14px; flex-shrink: 0; }
+.team-head > div { flex: 1; min-width: 0; }
+.team-head h1 { font-size: 28px; font-weight: 750; margin: 0 0 4px; overflow-wrap: anywhere; }
+.team-head .screen-subtitle { margin-bottom: 0; }
+.star-button { border-radius: 24px; padding: 8px 16px; font-weight: 650; background: #ffffff08; }
+.star-button[aria-pressed=true] { color: var(--accent-ink); border-color: var(--accent-ink); }
+#team-star-note:empty, #team-live-note:empty, #team-games-note:empty, #schedule-coverage:empty, #streams-scope:empty { display: none; }
+#team-live .button-link { display: inline-block; margin-top: 10px; }
+.day-heading { margin: 22px 0 2px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+#schedule-refresh { border-radius: 24px; padding: 8px 15px; background: #ffffff08; }
+/* About, build and installation live at the end of More rather than under every screen. */
+#more-view > footer { margin-top: 28px; }
+#more-view > footer h2 { flex: 1 0 100%; font-size: 14px; margin: 0; color: var(--ink); }
+#more-view > footer p { margin: 0; }
+/* Main Player back/forward: compact, secondary to Play/Pause. */
+.skip-row { display: flex; justify-content: center; gap: 10px; margin: -12px 0 18px; }
+.skip-row button { min-height: 44px; padding: 8px 16px; border-radius: 24px; background: #ffffff08; font-weight: 650; font-variant-numeric: tabular-nums; }
+.skip-row[hidden] { display: none; }
+#hold-help, #confirm-help { font-size: 13px; }
+#sync-help:empty { display: none; }
+.fine-adjust { margin-top: 12px; }
+.fine-adjust .nudge-row { max-width: 260px; }
+.player-screen #game-panel { margin: 4px 0 8px; }

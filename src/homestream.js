@@ -61,3 +61,14 @@ export async function checkPlaylist(url, { signal, fetcher = fetch, sleep = wait
     return error.message === 'missing' ? 'missing' : 'unavailable';
   }
 }
+// One catalog game-list schema for Listen and read-only browsing: explicit IDs, opponent, finite or
+// null start, and only gateway media routes for this team's own game. Anything else rejects the list.
+export function validateGames(loaded, teamId, { origin = configuredGatewayOrigin(), allowLocal = gatewayOptions().allowLocal } = {}) {
+  if (!Array.isArray(loaded)) throw Error('catalog-invalid');
+  return loaded.map(game => {
+    if (!game || !/^[A-Za-z0-9_-]+$/.test(game.id) || typeof game.opponent !== 'string' || !(game.start === null || Number.isFinite(game.start))) throw Error('catalog-invalid');
+    const url = game.url === null ? null : mediaURL(game.url, { origin, allowLocal, path: `/media/game/${teamId}/${game.id}` });
+    if (game.url !== null && !url) throw Error('catalog-invalid');
+    return { ...game, url };
+  });
+}

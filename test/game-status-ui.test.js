@@ -19,6 +19,9 @@ import { TIMELINE_NOTICE, FALLBACK_NOTICE } from '../src/hls-timeline.js';
 import * as shell from '../src/ui-shell.js';
 import { applySchoolTheme } from '../src/school-theme.js';
 import { defaultGame } from '../src/game-choice.js';
+import { validateGames } from '../src/homestream.js';
+import { createTeamPreferences } from '../src/team-preferences.js';
+import { createBrowseCatalog } from '../src/browse-catalog.js';
 globalThis.__GATEWAY_ORIGIN__ = 'https://gateway.example';
 const strip = file => fs.readFileSync(new URL(file, import.meta.url), 'utf8').replace(/^import .*;\n/gm, '').replace(/export function/g, 'function');
 const homestreamSource = strip('../src/homestream-ui.js'), appSource = strip('../src/app.js');
@@ -66,7 +69,7 @@ function harness(t) {
   w.setInterval = (fn, ms) => { h.intervals.push({ fn, ms }); return h.intervals.length; };
   w.__GATEWAY_ORIGIN__ = 'https://gateway.example';
   Object.assign(w, {setupViews, AbortController, metadataURL, mediaURL, configuredGatewayOrigin, gatewayOptions, readJSON, PlaybackMemory, SessionLog, teams, Player: FakePlayer, demoURL: () => 'blob:demo', setupArchive: options => { h.archive = options; }, defaultGame,
-    createNowPlaying, nowPlayingArtwork, createScoreboard, listenTeams, resolveSources, officialLink, createListenSession, failureKind, TIMELINE_NOTICE, FALLBACK_NOTICE, applySchoolTheme, ...shell,
+    createNowPlaying, nowPlayingArtwork, createScoreboard, listenTeams, resolveSources, officialLink, createListenSession, failureKind, TIMELINE_NOTICE, FALLBACK_NOTICE, applySchoolTheme, ...shell, validateGames, createTeamPreferences, createBrowseCatalog,
     setupGameTiming: () => ({ start() {}, stop() {}, reset() {}, invalidate() {}, render() {} }),
     checkPlaylist: url => { h.probes.push({ url, labels: h.labels() }); if (!h.holdProbe) return Promise.resolve('ready'); const gate = deferred(); h.releaseProbe = () => gate.resolve('ready'); return gate.promise; },
     createBroadcastCountdown: () => ({ setSchool() {}, tick() {}, suspend() {}, resume() {}, stop() {} }), createGameStatus: options => createGameStatus({ ...options, clock, timeout: () => new AbortController().signal,
@@ -236,7 +239,7 @@ test('the test tone, a Recordings takeover or a manual game during the wait each
   h.$('game').value = 'g1'; await h.$('game').onchange(); await flush();
   assert.deepEqual([h.$('game').value, h.probes.length], ['g1', 1]);
   await release(h); deadline(h).forEach(x => x.fn()); await flush();
-  assert.deepEqual([h.$('game').value, h.probes.length, h.$('game-note').textContent], ['g1', 1, 'Live playlist confirmed. Press Play, then match the audio to your TV.']);
+  assert.deepEqual([h.$('game').value, h.probes.length, h.$('game-note').textContent], ['g1', 1, 'Live playlist confirmed: this game feed is advancing.']);
 });
 test('a team change or hidden tab during the wait: late data cannot choose for the new school; hidden settles at once', async t => {
   let h = await deciding(t);
